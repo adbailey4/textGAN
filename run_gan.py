@@ -90,7 +90,7 @@ def load_tweet_data(file_list, end_tweet_char=u'\u26D4'):
     print(repr(''.join(chars)))
     print(len(chars))
     len_x = len(chars)
-    seq_len = max(all_seq_len)+1
+    seq_len = max(all_seq_len) + 1
     # create translation dictionaries
     ix_to_char = {ix: char for ix, char in enumerate(chars)}
     char_to_ix = {char: ix for ix, char in enumerate(chars)}
@@ -100,14 +100,14 @@ def load_tweet_data(file_list, end_tweet_char=u'\u26D4'):
         for indx, char in enumerate(tweet):
             vector_tweet[indx, char_to_ix[char]] = 1
         # add tweet ending character to tweet
-        vector_tweet[indx+1, char_to_ix[end_tweet_char]] = 1
+        vector_tweet[indx + 1, char_to_ix[end_tweet_char]] = 1
         all_vectorized_tweets.append(vector_tweet)
 
     return len_x, seq_len, ix_to_char, char_to_ix, training_labels(input=np.asarray(all_vectorized_tweets),
                                                                    seq_len=np.asarray(all_seq_len))
 
 
-def generator(input_vector, max_seq_len, n_hidden, batch_size, stop_char_index=0, dropout=False, output_keep_prob=1):
+def generator(input_vector, max_seq_len, n_hidden, batch_size, dropout=False, output_keep_prob=1):
     """Feeds output from lstm into input of same lstm cell"""
     with tf.variable_scope("generator_lstm"):
         # make new lstm cell for every step
@@ -119,7 +119,6 @@ def generator(input_vector, max_seq_len, n_hidden, batch_size, stop_char_index=0
             return cell(inputs=input_vector, state=state)
 
         state = tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias).zero_state(batch_size, tf.float32)
-        generator_seq_len = "something"
         outputs = []
         for time_step in range(max_seq_len):
             if time_step > 0:
@@ -131,7 +130,7 @@ def generator(input_vector, max_seq_len, n_hidden, batch_size, stop_char_index=0
         output = tf.stack(outputs, 1)
         print(output)
 
-    return output, generator_seq_len
+    return output
 
 
 def fulconn_layer(input_data, output_dim, seq_len=1, activation_func=None):
@@ -204,6 +203,7 @@ def g_variable_summaries(var, name):
 
 class TrainingData(object):
     """Get batches from training dataset"""
+
     def __init__(self, training_data, batch_size):
         self.training_data = training_data
         self.len_data = len(self.training_data.seq_len)
@@ -211,17 +211,17 @@ class TrainingData(object):
 
     def get_batch(self):
         """Get batch of data"""
-        index = np.random.randint(0, self.len_data-self.batch_size)
-        x = self.training_data.input[index:index+self.batch_size]
-        seq_len = self.training_data.seq_len[index:index+self.batch_size]
+        index = np.random.randint(0, self.len_data - self.batch_size)
+        x = self.training_data.input[index:index + self.batch_size]
+        seq_len = self.training_data.seq_len[index:index + self.batch_size]
         return x, seq_len
 
 
 ##################################
 # define hyperparameters
 log.basicConfig(format='%(levelname)s:%(message)s', level=log.DEBUG)
-end_tweet_char=u'\u26D4'
-batch_size = 30
+end_tweet_char = u'\u26D4'
+batch_size = 10
 d_n_hidden = 100
 forget_bias = 1
 learning_rate = 0.001
@@ -229,16 +229,22 @@ iterations = 1000
 model_name = "first_pass_gan"
 output_dir = "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGan/models/test_gan"
 load_model = True
-trained_model_dir = "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGan/models/test_gan"
+trained_model_dir = "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGan/models/first_pass"
 twitter_data_path = "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGan/example_tweet_data/train_csv"
 ##################################
 
 
 file_list = list_dir(twitter_data_path, ext="csv")
-print(file_list)
 
 len_x, max_seq_len, ix_to_char, char_to_ix, tweet_data = load_tweet_data([file_list[1]])
-stop_char_index = char_to_ix[end_tweet_char]
+stop_char_index = tf.get_variable('stop_char_index', [],
+                                  initializer=tf.constant_initializer(char_to_ix[end_tweet_char]),
+                                  trainable=False, dtype=tf.int64)
+
+max_seq_len_tensor = tf.get_variable('max_seq_len', [],
+                                     initializer=tf.constant_initializer(max_seq_len),
+                                     trainable=False, dtype=tf.int32)
+
 # right now we are not passing generator output through fully conn layer so we have to match the size of each character
 gen_n_hidden = len_x
 len_y = 1
@@ -255,110 +261,132 @@ d_global_step = tf.get_variable(
     'd_global_step', [],
     initializer=tf.constant_initializer(0), trainable=False)
 
-
 # create easily accessible training data
 training_data = TrainingData(tweet_data, batch_size)
-x_batch, seq_batch = training_data.get_batch()
-
 
 # create models
-Gz, generator_seq_len = generator(place_Z, max_seq_len, gen_n_hidden, batch_size, stop_char_index=stop_char_index)
+Gz = generator(place_Z, max_seq_len, gen_n_hidden, batch_size)
 log.info("Generator Model Built")
-Dx = discriminator(place_X, place_Seq, d_n_hidden, len_y, forget_bias=forget_bias)
-log.info("1st Discriminator Model Built")
-Dg = discriminator(Gz, place_Seq, d_n_hidden, len_y, forget_bias=forget_bias, reuse=True)
-log.info("2nd Discriminator Model Built")
-#
-# g_predict = tf.reshape(tf.argmax(Gz, 2), [batch_size, 1, max_seq_len])
-# g_accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.sign(Dg), tf.ones_like(Dg)), tf.float32))
-#
-# d_accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.sign(tf.stack([Dg, Dx])),
-#                                              tf.stack([tf.negative(tf.ones_like(Dg)), tf.ones_like(Dx)])), tf.float32))
-#
-#
-# indicies = tf.where(tf.equal(tf.sign(Dg), tf.ones_like(Dg)))
-# passed_sentences = tf.gather_nd(g_predict, indicies)
-#
-# # print(g_accuracy2.get_shape())
-# # calculate loss
-# g_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=Dg, labels=tf.ones_like(Dg)))
-# d_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=Dx, labels=tf.ones_like(Dx)))
-# d_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=Dg, labels=tf.zeros_like(Dg)))
-# d_loss = d_loss_real + d_loss_fake
-# log.info("Created Loss functions")
-#
-#
-# # create summary info
-# g_variable_summaries(g_loss, "generator_loss")
-# d_variable_summaries(d_loss, "discriminator_loss")
-# g_variable_summaries(g_accuracy, "generator_accuracy")
-# d_variable_summaries(d_accuracy, "discriminator_accuracy")
-# all_summary = tf.summary.merge_all()
-#
-# # partition trainable variables
-# tvars = tf.trainable_variables()
-# d_vars = [var for var in tvars if 'discriminator_lstm' in var.name]
-# g_vars = [var for var in tvars if 'generator_lstm' in var.name]
-#
-# # define optimizers
-# opt = tf.train.AdamOptimizer(learning_rate=learning_rate)
-#
-# # define update step
-# trainerD = opt.minimize(d_loss, var_list=d_vars, global_step=d_global_step)
-# trainerG = opt.minimize(g_loss, var_list=g_vars, global_step=g_global_step)
-# log.info("Defined Optimizers")
-#
-# # define config
-# config = tf.ConfigProto(log_device_placement=False,
-#                         intra_op_parallelism_threads=8,
-#                         allow_soft_placement=True)
-#
-#
-# with tf.Session(config=config) as sess:
-#     if load_model:
-#         writer = tf.summary.FileWriter(trained_model_dir, sess.graph)
-#         saver = tf.train.Saver(max_to_keep=4, keep_checkpoint_every_n_hours=2)
-#         model_path = tf.train.latest_checkpoint(trained_model_dir)
-#         saver.restore(sess, model_path)
-#         write_graph = False
-#         log.info("Loaded Model: {}".format(trained_model_dir))
-#     else:
-#         # initialize
-#         writer = tf.summary.FileWriter(output_dir, sess.graph)
-#         sess.run(tf.global_variables_initializer())
-#         model_path = os.path.join(output_dir, model_name)
-#         saver = tf.train.Saver(max_to_keep=4, keep_checkpoint_every_n_hours=2)
-#         saver.save(sess, model_path,
-#                    global_step=d_global_step+g_global_step)
-#         write_graph = True
-#
-#     # start training
-#     log.info("Started Training")
-#
-#     for i in range(iterations):
-#         x_batch, seq_batch = training_data.get_batch()
-#         z_batch = np.random.normal(-1, 1, size=[batch_size, len_x])
-#         if i == 0:
-#             _, gLoss = sess.run([trainerG, g_loss], feed_dict={place_Z: z_batch, place_Seq: seq_batch})
-#             _, dLoss = sess.run([trainerD, d_loss], feed_dict={place_Z: z_batch, place_X: x_batch, place_Seq: seq_batch})
-#         if dLoss < gLoss:
-#             _, gLoss = sess.run([trainerG, g_loss], feed_dict={place_Z: z_batch, place_Seq: seq_batch})
-#         else:
-#             _, dLoss = sess.run([trainerD, d_loss], feed_dict={place_Z: z_batch, place_X: x_batch, place_Seq: seq_batch})
-#         if i % 10 == 0:
-#             summary_info, d_step, g_step = sess.run([all_summary, d_global_step, g_global_step],
-#                                                      feed_dict={place_Z: z_batch, place_X: x_batch, place_Seq: seq_batch})
-#             writer.add_summary(summary_info, global_step=d_step+g_step)
-#             saver.save(sess, model_path,
-#                        global_step=d_global_step+g_global_step, write_meta_graph=write_graph)
-#             write_graph = False
-#         if i % 100 == 0:
-#             fake_tweets, d_step, g_step = sess.run([passed_sentences, d_global_step, g_global_step],
-#                                                    feed_dict={place_Z: z_batch, place_X: x_batch, place_Seq: seq_batch})
-#             print("Global Discriminator Step: {}".format(d_step))
-#             print("Global Generator Step: {}".format(g_step))
-#             if len(fake_tweets) != 0:
-#                 print(repr(''.join([ix_to_char[x] for x in fake_tweets[0]])))
-#
-# log.info("Finished Training")
 
+
+def index1d(t):
+    """Get index of first appearance of specific character"""
+    index = tf.cast(tf.reduce_min(tf.where(tf.equal(stop_char_index, t))), dtype=tf.int32)
+    # return index
+    return tf.cond(index < 0, lambda: tf.cast(max_seq_len_tensor, dtype=tf.int32),
+                   lambda: tf.cast(tf.add(index, 1), dtype=tf.int32))
+
+
+# get character indexes for all sequences
+gen_char_index = tf.argmax(Gz, axis=2)
+# length of the sequence for the generator network based on termination character
+z_seq_length = tf.map_fn(index1d, gen_char_index, dtype=tf.int32, back_prop=False)
+print(z_seq_length)
+# z_seq_length = tf.reshape(z_seq_length, shape=[-1])
+# discriminator for generator output
+Dg = discriminator(Gz, z_seq_length, d_n_hidden, len_y, forget_bias=forget_bias, reuse=False)
+log.info("1st Discriminator Model Built")
+
+# discriminator for twitter data
+Dx = discriminator(place_X, place_Seq, d_n_hidden, len_y, forget_bias=forget_bias, reuse=True)
+log.info("2nd Discriminator Model Built")
+
+# generator sentences
+g_predict = tf.reshape(tf.argmax(Gz, 2), [batch_size, 1, max_seq_len])
+
+# generator accuracy
+g_accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.sign(Dg), tf.ones_like(Dg)), tf.float32))
+
+# discriminator accuracy
+d_accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.sign(tf.stack([Dg, Dx])),
+                                             tf.stack([tf.negative(tf.ones_like(Dg)), tf.ones_like(Dx)])), tf.float32))
+
+# sentences that passed the discriminator
+indicies = tf.where(tf.equal(tf.sign(Dg), tf.ones_like(Dg)))
+passed_sentences = tf.gather_nd(g_predict, indicies)
+
+# calculate loss
+g_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=Dg, labels=tf.ones_like(Dg)))
+d_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=Dx, labels=tf.ones_like(Dx)))
+d_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=Dg, labels=tf.zeros_like(Dg)))
+d_loss = d_loss_real + d_loss_fake
+log.info("Created Loss functions")
+
+# create summary info
+g_variable_summaries(g_loss, "generator_loss")
+d_variable_summaries(d_loss, "discriminator_loss")
+g_variable_summaries(g_accuracy, "generator_accuracy")
+d_variable_summaries(d_accuracy, "discriminator_accuracy")
+all_summary = tf.summary.merge_all()
+
+# partition trainable variables
+tvars = tf.trainable_variables()
+d_vars = [var for var in tvars if 'discriminator_lstm' in var.name]
+g_vars = [var for var in tvars if 'generator_lstm' in var.name]
+
+# define optimizers
+opt = tf.train.AdamOptimizer(learning_rate=learning_rate)
+
+# define update step
+trainerD = opt.minimize(d_loss, var_list=d_vars, global_step=d_global_step)
+trainerG = opt.minimize(g_loss, var_list=g_vars, global_step=g_global_step)
+log.info("Defined Optimizers")
+
+# define config
+config = tf.ConfigProto(log_device_placement=False,
+                        intra_op_parallelism_threads=8,
+                        allow_soft_placement=True)
+
+with tf.Session(config=config) as sess:
+    if load_model:
+        writer = tf.summary.FileWriter(trained_model_dir, sess.graph)
+        saver = tf.train.Saver(max_to_keep=4, keep_checkpoint_every_n_hours=2)
+        model_path = tf.train.latest_checkpoint(trained_model_dir)
+        saver.restore(sess, model_path)
+        write_graph = False
+        log.info("Loaded Model: {}".format(trained_model_dir))
+    else:
+        # initialize
+        writer = tf.summary.FileWriter(output_dir, sess.graph)
+        sess.run(tf.global_variables_initializer())
+        model_path = os.path.join(output_dir, model_name)
+        saver = tf.train.Saver(max_to_keep=4, keep_checkpoint_every_n_hours=2)
+        saver.save(sess, model_path,
+                   global_step=d_global_step + g_global_step)
+        write_graph = True
+
+    # start training
+    log.info("Started Training")
+
+    for i in range(iterations):
+        x_batch, seq_batch = training_data.get_batch()
+        z_batch = np.random.normal(0, 1, size=[batch_size, len_x])
+        if i == 0:
+            z_seq_length1 = sess.run([z_seq_length], feed_dict={place_Z: z_batch})
+            print(z_seq_length1)
+            _, gLoss = sess.run([trainerG, g_loss], feed_dict={place_Z: z_batch})
+            _, dLoss = sess.run([trainerD, d_loss],
+                                feed_dict={place_Z: z_batch, place_X: x_batch, place_Seq: seq_batch})
+        if dLoss < gLoss:
+            _, gLoss = sess.run([trainerG, g_loss], feed_dict={place_Z: z_batch})
+        else:
+            _, dLoss = sess.run([trainerD, d_loss],
+                                feed_dict={place_Z: z_batch, place_X: x_batch, place_Seq: seq_batch})
+        if i % 10 == 0:
+            summary_info, d_step, g_step = sess.run([all_summary, d_global_step, g_global_step],
+                                                    feed_dict={place_Z: z_batch, place_X: x_batch,
+                                                               place_Seq: seq_batch})
+            writer.add_summary(summary_info, global_step=d_step + g_step)
+            saver.save(sess, model_path,
+                       global_step=d_global_step + g_global_step, write_meta_graph=write_graph)
+            write_graph = False
+        if i % 100 == 0:
+            fake_tweets, d_step, g_step = sess.run([passed_sentences, d_global_step, g_global_step],
+                                                   feed_dict={place_Z: z_batch, place_X: x_batch, place_Seq: seq_batch})
+            print("Global Discriminator Step: {}".format(d_step))
+            print("Global Generator Step: {}".format(g_step))
+            if len(fake_tweets) != 0:
+                sentence = ''.join([ix_to_char[x] for x in fake_tweets[0]])
+                print(repr(sentence[:sentence.index(end_tweet_char)+1]))
+
+log.info("Finished Training")

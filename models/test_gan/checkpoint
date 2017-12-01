@@ -1,0 +1,5 @@
+model_checkpoint_path: "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGan/models/test_gan/first_pass_gan-993"
+all_model_checkpoint_paths: "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGan/models/test_gan/first_pass_gan-963"
+all_model_checkpoint_paths: "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGan/models/test_gan/first_pass_gan-973"
+all_model_checkpoint_paths: "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGan/models/test_gan/first_pass_gan-983"
+all_model_checkpoint_paths: "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGan/models/test_gan/first_pass_gan-993"
