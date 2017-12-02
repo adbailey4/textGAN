@@ -31,6 +31,14 @@ RL_LOW=1
 RL_MED=2
 RL_HIGH=3
 
+#character mapping for emojis
+BASIC_EMOJIS = [u'\U0001F600', u'\U0001F61B', u'\U0001F620', u'\U0001F62D', # grin, angry, tongue, cry
+                u'\U0001F618', u'\u2764', u'\U0001F609', u'\U0001F60D',  # blow kiss, heart, wink, heart eyes
+                u'\u2639', u'\U0001F4A9', u'\U0001F44D', u'\U0001F60E', # frown, poop, thumbs up, sunglasses
+                u'\U0001F610', u'\U0001F44C', u'\u2611', u'\U0001F525', ] #neutral face, ok, check mark, fire
+BASIC_EMOJI_ENUMERATIONS = [[u'<emoji_{}'.format(i), BASIC_EMOJIS[i]] for i in range(len(BASIC_EMOJIS))]
+
+
 # do you want to live life on the edge?  then leave this line uncommented, you badass!
 import warnings
 warnings.filterwarnings("ignore")
@@ -56,12 +64,18 @@ def list_dir(path, ext=""):
 
 # this prints the following error:
 #   "RuntimeWarning: Surrogate character u'\udc23' will be ignored. You might be using a narrow Python build"
-def reduce_unicode_characters(unicode_str, reduction_level=RL_HIGH):
+def reduce_unicode_characters(unicode_str, reduction_level=RL_MED):
     if reduction_level == RL_HIGH:
-
         return unidecode(unicode_str)
-    # todo: add more levels of reduction
+    if reduction_level == RL_MED:
+        for substitution in BASIC_EMOJI_ENUMERATIONS:
+            unicode_str = unicode_str.replace(substitution[1], substitution[0])
+        unicode_str = unidecode(unicode_str)
+        for substitution in BASIC_EMOJI_ENUMERATIONS:
+            unicode_str = unicode_str.replace(substitution[0], substitution[1])
+        return unicode_str
     return unicode_str
+
 
 
 def read_tweet_data(filename):
