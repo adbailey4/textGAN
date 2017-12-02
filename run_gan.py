@@ -20,10 +20,20 @@ import argparse
 from datetime import datetime
 import numpy as np
 import time
-from itertools import izip
-import tensorflow as tf
-from tensorflow.python.client import timeline
+# import tensorflow as tf
+# from tensorflow.python.client import timeline
 import unicodecsv
+from unidecode import unidecode
+
+# reduction level definitions
+RL_NONE=0
+RL_LOW=1
+RL_MED=2
+RL_HIGH=3
+
+# do you want to live life on the edge?  then leave this line uncommented, you badass!
+import warnings
+warnings.filterwarnings("ignore")
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -44,6 +54,16 @@ def list_dir(path, ext=""):
     return only_files
 
 
+# this prints the following error:
+#   "RuntimeWarning: Surrogate character u'\udc23' will be ignored. You might be using a narrow Python build"
+def reduce_unicode_characters(unicode_str, reduction_level=RL_HIGH):
+    if reduction_level == RL_HIGH:
+
+        return unidecode(unicode_str)
+    # todo: add more levels of reduction
+    return unicode_str
+
+
 def read_tweet_data(filename):
     """
     Read in tweet collection of "HillaryClinton" and "realDonaldTrump" (or "none in case of test data).
@@ -59,7 +79,7 @@ def read_tweet_data(filename):
     r = unicodecsv.reader(fileH, encoding='utf-8')
     for row in r:
         handles.append(row[0])
-        tweets.append(row[1])
+        tweets.append(reduce_unicode_characters(row[1]))
     # write to file to test if data is read in correctly (should be exactly the same as the input file)
     # outfileH = open('./out.csv','w')
     # outfileH.write(",".join(header) + "\n")
@@ -94,20 +114,8 @@ def load_tweet_data(file_list, end_tweet_char=u'\u26D4'):
     # create translation dictionaries
     ix_to_char = {ix: char for ix, char in enumerate(chars)}
     char_to_ix = {char: ix for ix, char in enumerate(chars)}
-    # create padded input arrays
-    # for tweet in all_tweets:
-    #     vector_tweet = np.zeros([seq_len, len_x])
-    #     for indx, char in enumerate(tweet):
-    #         vector_tweet[indx, char_to_ix[char]] = 1
-    #     # add tweet ending character to tweet
-    #     vector_tweet[indx + 1, char_to_ix[end_tweet_char]] = 1
-    #     all_vectorized_tweets.append(vector_tweet)
-
-    # return len_x, seq_len, ix_to_char, char_to_ix, training_labels(input=np.asarray(all_vectorized_tweets),
-    #                                                                seq_len=np.asarray(all_seq_len))
 
     return len_x, seq_len, ix_to_char, char_to_ix, all_tweets, all_seq_len
-
 
 def generator(input_vector, max_seq_len, n_hidden, batch_size, dropout=False, output_keep_prob=1):
     """Feeds output from lstm into input of same lstm cell"""
