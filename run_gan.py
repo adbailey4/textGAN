@@ -79,7 +79,7 @@ def load_tweet_data(file_list, end_tweet_char=u'\u26D4'):
     for tweet_file in file_list:
         _, tweets = read_tweet_data(tweet_file)
         all_tweets.extend(tweets)
-        all_seq_len.extend([len(tweet) for tweet in tweets])
+        all_seq_len.extend([len(tweet)+1 for tweet in tweets])
     # changed to sorted so it is deterministic
     chars = (list(set(''.join(all_tweets))))
     # get all the possible characters and the maximum tweet length
@@ -90,7 +90,7 @@ def load_tweet_data(file_list, end_tweet_char=u'\u26D4'):
     print("Characters in Corpus\n", repr(''.join(chars)))
     print("Number of Characters: {}".format(len(chars)))
     len_x = len(chars)
-    seq_len = max(all_seq_len) + 1
+    seq_len = max(all_seq_len)
     # create translation dictionaries
     ix_to_char = {ix: char for ix, char in enumerate(chars)}
     char_to_ix = {char: ix for ix, char in enumerate(chars)}
@@ -235,6 +235,7 @@ log.info("Model Path {}".format(model_path))
 file_list = list_dir(twitter_data_path, ext="csv")
 
 len_x, max_seq_len, ix_to_char, char_to_ix, tweet_data = load_tweet_data(file_list)
+
 stop_char_index = tf.get_variable('stop_char_index', [],
                                   initializer=tf.constant_initializer(char_to_ix[end_tweet_char]),
                                   trainable=False, dtype=tf.int64)
@@ -370,6 +371,7 @@ with tf.Session(config=config) as sess:
         if gLoss > 2:
             _, gLoss = sess.run([trainerG, g_loss], feed_dict={place_Z: z_batch})
             step += 1
+
         if step % 10 == 0:
             summary_info, d_step, g_step = sess.run([all_summary, d_global_step, g_global_step],
                                                     feed_dict={place_Z: z_batch, place_X: x_batch,
