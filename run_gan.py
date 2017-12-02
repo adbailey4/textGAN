@@ -95,16 +95,18 @@ def load_tweet_data(file_list, end_tweet_char=u'\u26D4'):
     ix_to_char = {ix: char for ix, char in enumerate(chars)}
     char_to_ix = {char: ix for ix, char in enumerate(chars)}
     # create padded input arrays
-    for tweet in all_tweets:
-        vector_tweet = np.zeros([seq_len, len_x])
-        for indx, char in enumerate(tweet):
-            vector_tweet[indx, char_to_ix[char]] = 1
-        # add tweet ending character to tweet
-        vector_tweet[indx + 1, char_to_ix[end_tweet_char]] = 1
-        all_vectorized_tweets.append(vector_tweet)
+    # for tweet in all_tweets:
+    #     vector_tweet = np.zeros([seq_len, len_x])
+    #     for indx, char in enumerate(tweet):
+    #         vector_tweet[indx, char_to_ix[char]] = 1
+    #     # add tweet ending character to tweet
+    #     vector_tweet[indx + 1, char_to_ix[end_tweet_char]] = 1
+    #     all_vectorized_tweets.append(vector_tweet)
 
-    return len_x, seq_len, ix_to_char, char_to_ix, training_labels(input=np.asarray(all_vectorized_tweets),
-                                                                   seq_len=np.asarray(all_seq_len))
+    # return len_x, seq_len, ix_to_char, char_to_ix, training_labels(input=np.asarray(all_vectorized_tweets),
+    #                                                                seq_len=np.asarray(all_seq_len))
+
+    return len_x, seq_len, ix_to_char, char_to_ix, all_tweets, all_seq_len
 
 
 def generator(input_vector, max_seq_len, n_hidden, batch_size, dropout=False, output_keep_prob=1):
@@ -191,17 +193,32 @@ def variable_summaries(var, name):
 class TrainingData(object):
     """Get batches from training dataset"""
 
-    def __init__(self, training_data, batch_size):
-        self.training_data = training_data
-        self.len_data = len(self.training_data.seq_len)
+    def __init__(self, all_tweets, all_seq_len, len_x, batch_size):
+        self.all_tweets = all_tweets
+        self.all_seq_len = all_seq_len
+        self.len_x = len_x
+        self.max_seq_len = max(all_seq_len)
+        self.len_data = len(all_tweets)
         self.batch_size = batch_size
+        self.curr_batch_x = []
+        self.curr_batch_seq = []
 
     def get_batch(self):
         """Get batch of data"""
-        index = np.random.randint(0, self.len_data - self.batch_size)
-        x = self.training_data.input[index:index + self.batch_size]
-        seq_len = self.training_data.seq_len[index:index + self.batch_size]
-        return x, seq_len
+        self.read_in_batch()
+        return np.asarray(self.curr_batch_x), np.asarray(self.curr_batch_seq)
+
+    def read_in_batch(self):
+        """Read in data as needed by the batch"""
+        for i in range(self.batch_size):
+            vector_tweet = np.zeros([self.max_seq_len, self.len_x])
+            for indx, char in enumerate(np.random.choice(self.all_tweets)):
+                vector_tweet[indx, char_to_ix[char]] = 1
+            # add tweet ending character to tweet
+            vector_tweet[indx + 1, char_to_ix[end_tweet_char]] = 1
+            self.curr_batch_x.append(vector_tweet)
+            self.curr_batch_seq.append(indx+1)
+
 
 
 ##################################
@@ -234,7 +251,7 @@ log.info("Model Path {}".format(model_path))
 
 file_list = list_dir(twitter_data_path, ext="csv")
 
-len_x, max_seq_len, ix_to_char, char_to_ix, tweet_data = load_tweet_data(file_list)
+len_x, max_seq_len, ix_to_char, char_to_ix, all_tweets, all_seq_len = load_tweet_data([file_list[1]])
 
 stop_char_index = tf.get_variable('stop_char_index', [],
                                   initializer=tf.constant_initializer(char_to_ix[end_tweet_char]),
@@ -261,7 +278,7 @@ d_global_step = tf.get_variable(
     initializer=tf.constant_initializer(0), trainable=False)
 
 # create easily accessible training data
-training_data = TrainingData(tweet_data, batch_size)
+training_data = TrainingData(all_tweets, all_seq_len, len_x, batch_size)
 
 # create models
 Gz = generator(place_Z, max_seq_len, gen_n_hidden, batch_size)
