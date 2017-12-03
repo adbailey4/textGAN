@@ -25,27 +25,28 @@ from tensorflow.python.client import timeline
 import unicodecsv
 from unidecode import unidecode
 import threading
+
 try:
     import Queue as queue
 except ImportError:
     import queue
 
 # reduction level definitions
-RL_NONE=0
-RL_LOW=1
-RL_MED=2
-RL_HIGH=3
+RL_NONE = 0
+RL_LOW = 1
+RL_MED = 2
+RL_HIGH = 3
 
-#character mapping for emojis
-BASIC_EMOJIS = [u'\U0001F600', u'\U0001F61B', u'\U0001F620', u'\U0001F62D', # grin, angry, tongue, cry
+# character mapping for emojis
+BASIC_EMOJIS = [u'\U0001F600', u'\U0001F61B', u'\U0001F620', u'\U0001F62D',  # grin, angry, tongue, cry
                 u'\U0001F618', u'\u2764', u'\U0001F609', u'\U0001F60D',  # blow kiss, heart, wink, heart eyes
-                u'\u2639', u'\U0001F4A9', u'\U0001F44D', u'\U0001F60E', # frown, poop, thumbs up, sunglasses
-                u'\U0001F610', u'\U0001F44C', u'\u2611', u'\U0001F525', ] #neutral face, ok, check mark, fire
+                u'\u2639', u'\U0001F4A9', u'\U0001F44D', u'\U0001F60E',  # frown, poop, thumbs up, sunglasses
+                u'\U0001F610', u'\U0001F44C', u'\u2611', u'\U0001F525', ]  # neutral face, ok, check mark, fire
 BASIC_EMOJI_ENUMERATIONS = [[u'<emoji_{}'.format(i), BASIC_EMOJIS[i]] for i in range(len(BASIC_EMOJIS))]
-
 
 # do you want to live life on the edge?  then leave this line uncommented, you badass!
 import warnings
+
 warnings.filterwarnings("ignore")
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -82,8 +83,7 @@ def reduce_unicode_characters(unicode_str, reduction_level=RL_MED):
     return unicode_str
 
 
-
-def read_tweet_data(filename):
+def read_tweet_data(filename, reduction_level):
     """
     Read in tweet collection of "HillaryClinton" and "realDonaldTrump" (or "none in case of test data).
     Other twitter handles would break this function.
@@ -98,7 +98,7 @@ def read_tweet_data(filename):
     r = unicodecsv.reader(fileH, encoding='utf-8')
     for row in r:
         handles.append(row[0])
-        tweets.append(reduce_unicode_characters(row[1]))
+        tweets.append(reduce_unicode_characters(row[1], reduction_level=reduction_level))
     # write to file to test if data is read in correctly (should be exactly the same as the input file)
     # outfileH = open('./out.csv','w')
     # outfileH.write(",".join(header) + "\n")
@@ -107,7 +107,7 @@ def read_tweet_data(filename):
     return handles, tweets
 
 
-def load_tweet_data(file_list, end_tweet_char=u'\u26D4'):
+def load_tweet_data(file_list, reduction_level, end_tweet_char=u'\u26D4'):
     """Read in tweet data from csv file
     source: https://chunml.github.io/ChunML.github.io/project/Creating-Text-Generator-Using-Recurrent-Neural-Network/
     """
@@ -116,9 +116,9 @@ def load_tweet_data(file_list, end_tweet_char=u'\u26D4'):
     all_vectorized_tweets = []
     # collect all tweets from csv files
     for tweet_file in file_list:
-        _, tweets = read_tweet_data(tweet_file)
+        _, tweets = read_tweet_data(tweet_file, reduction_level=reduction_level)
         all_tweets.extend(tweets)
-        all_seq_len.extend([len(tweet)+1 for tweet in tweets])
+        all_seq_len.extend([len(tweet) + 1 for tweet in tweets])
     # changed to sorted so it is deterministic
     chars = (list(set(''.join(all_tweets))))
     # get all the possible characters and the maximum tweet length
@@ -249,7 +249,7 @@ class TrainingData(object):
                 # add tweet ending character to tweet
                 vector_tweet[indx + 1, char_to_ix[end_tweet_char]] = 1
                 x_batch.append(vector_tweet)
-                seq_batch.append(indx+2)
+                seq_batch.append(indx + 2)
 
             self.queue.put([np.asarray(x_batch), np.asarray(seq_batch)])
 
@@ -257,7 +257,7 @@ class TrainingData(object):
         """ Start background threads to feed queue """
         threads = []
         for n in range(n_threads):
-            t = threading.Thread(target=self.read_in_batchs, args=(self.stop_event, ))
+            t = threading.Thread(target=self.read_in_batchs, args=(self.stop_event,))
             t.daemon = True  # thread will close when parent quits
             t.start()
             threads.append(t)
@@ -278,6 +278,7 @@ forget_bias = 1
 learning_rate = 0.001
 iterations = 1000
 threads = 4
+reduction_level = RL_HIGH
 model_name = "ascii_test"
 # output_dir = "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/test_gan"
 output_dir = os.path.abspath("models/ascii_test")
@@ -289,7 +290,7 @@ trained_model_dir = os.path.abspath("models/ascii_test")
 load_model = False
 if load_model:
     model_path = tf.train.latest_checkpoint(trained_model_dir)
-    #model_path = "models/test_gan/first_pass_gan-9766-19678"
+    # model_path = "models/test_gan/first_pass_gan-9766-19678"
 else:
     model_path = os.path.join(output_dir, model_name)
 log.info("Model Path {}".format(model_path))
@@ -299,7 +300,7 @@ log.info("Model Path {}".format(model_path))
 
 file_list = list_dir(twitter_data_path, ext="csv")
 
-len_x, max_seq_len, ix_to_char, char_to_ix, all_tweets, all_seq_len = load_tweet_data(file_list)
+len_x, max_seq_len, ix_to_char, char_to_ix, all_tweets, all_seq_len = load_tweet_data(file_list, reduction_level=reduction_level)
 
 stop_char_index = tf.get_variable('stop_char_index', [],
                                   initializer=tf.constant_initializer(char_to_ix[end_tweet_char]),
@@ -384,7 +385,6 @@ variable_summaries(g_accuracy, "generator_accuracy")
 variable_summaries(d_accuracy, "discriminator_accuracy")
 all_summary = tf.summary.merge_all()
 
-
 # partition trainable variables
 tvars = tf.trainable_variables()
 d_vars = [var for var in tvars if 'discriminator_lstm' in var.name]
@@ -433,17 +433,17 @@ with tf.Session(config=config) as sess:
             z_batch = np.random.normal(0, 1, size=[batch_size, len_x])
             step += 2
 
-        if gAccuracy < 0.4:
+        if gAccuracy < 0.2:
             _, gAccuracy = sess.run([trainerG, gAccuracy], feed_dict={place_Z: z_batch})
             step += 1
         if gAccuracy > 0.9:
             _, gAccuracy = sess.run([trainerD, gAccuracy],
-                                feed_dict={place_Z: z_batch, place_X: x_batch, place_Seq: seq_batch})
+                                    feed_dict={place_Z: z_batch, place_X: x_batch, place_Seq: seq_batch})
             step += 1
         else:
-            _, dLoss = sess.run([trainerD, d_loss],
-                                feed_dict={place_Z: z_batch, place_X: x_batch, place_Seq: seq_batch})
-            _, gLoss = sess.run([trainerG, g_loss], feed_dict={place_Z: z_batch})
+            _, gAccuracy = sess.run([trainerD, gAccuracy],
+                                    feed_dict={place_Z: z_batch, place_X: x_batch, place_Seq: seq_batch})
+            _, gAccuracy = sess.run([trainerG, gAccuracy], feed_dict={place_Z: z_batch})
             step += 2
 
         if step % 10 == 0:
@@ -462,7 +462,7 @@ with tf.Session(config=config) as sess:
             if len(fake_tweets) != 0:
                 sentence = ''.join([ix_to_char[x] for x in fake_tweets[0]])
                 try:
-                    print(repr(sentence[:sentence.index(end_tweet_char)+1]))
+                    print(repr(sentence[:sentence.index(end_tweet_char) + 1]))
                 except ValueError:
                     print(repr(sentence))
 
