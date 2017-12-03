@@ -20,10 +20,15 @@ import argparse
 from datetime import datetime
 import numpy as np
 import time
-# import tensorflow as tf
-# from tensorflow.python.client import timeline
+import tensorflow as tf
+from tensorflow.python.client import timeline
 import unicodecsv
 from unidecode import unidecode
+import threading
+try:
+    import Queue as queue
+except ImportError:
+    import queue
 
 # reduction level definitions
 RL_NONE=0
@@ -125,11 +130,13 @@ def load_tweet_data(file_list, end_tweet_char=u'\u26D4'):
     print("Number of Characters: {}".format(len(chars)))
     len_x = len(chars)
     seq_len = max(all_seq_len)
+    print("Max seq length: {}".format(seq_len))
     # create translation dictionaries
     ix_to_char = {ix: char for ix, char in enumerate(chars)}
     char_to_ix = {char: ix for ix, char in enumerate(chars)}
 
     return len_x, seq_len, ix_to_char, char_to_ix, all_tweets, all_seq_len
+
 
 def generator(input_vector, max_seq_len, n_hidden, batch_size, dropout=False, output_keep_prob=1):
     """Feeds output from lstm into input of same lstm cell"""
@@ -222,25 +229,43 @@ class TrainingData(object):
         self.max_seq_len = max(all_seq_len)
         self.len_data = len(all_tweets)
         self.batch_size = batch_size
-        self.curr_batch_x = []
-        self.curr_batch_seq = []
+        self.stop_event = threading.Event()
+        self.queue = queue.Queue(maxsize=20)
 
     def get_batch(self):
         """Get batch of data"""
-        self.read_in_batch()
-        return np.asarray(self.curr_batch_x), np.asarray(self.curr_batch_seq)
+        batch = self.queue.get()
+        return batch[0], batch[1]
 
-    def read_in_batch(self):
+    def read_in_batchs(self, stop_event):
         """Read in data as needed by the batch"""
-        for i in range(self.batch_size):
-            vector_tweet = np.zeros([self.max_seq_len, self.len_x])
-            for indx, char in enumerate(np.random.choice(self.all_tweets)):
-                vector_tweet[indx, char_to_ix[char]] = 1
-            # add tweet ending character to tweet
-            vector_tweet[indx + 1, char_to_ix[end_tweet_char]] = 1
-            self.curr_batch_x.append(vector_tweet)
-            self.curr_batch_seq.append(indx+1)
+        while not stop_event.is_set():
+            x_batch = []
+            seq_batch = []
+            for i in range(self.batch_size):
+                vector_tweet = np.zeros([self.max_seq_len, self.len_x])
+                for indx, char in enumerate(np.random.choice(self.all_tweets)):
+                    vector_tweet[indx, char_to_ix[char]] = 1
+                # add tweet ending character to tweet
+                vector_tweet[indx + 1, char_to_ix[end_tweet_char]] = 1
+                x_batch.append(vector_tweet)
+                seq_batch.append(indx+2)
 
+            self.queue.put([np.asarray(x_batch), np.asarray(seq_batch)])
+
+    def start_threads(self, n_threads=1):
+        """ Start background threads to feed queue """
+        threads = []
+        for n in range(n_threads):
+            t = threading.Thread(target=self.read_in_batchs, args=(self.stop_event, ))
+            t.daemon = True  # thread will close when parent quits
+            t.start()
+            threads.append(t)
+        return threads
+
+    def stop_threads(self):
+        """Kill daemon threads if needed"""
+        self.stop_event.set()
 
 
 ##################################
@@ -251,19 +276,20 @@ batch_size = 10
 d_n_hidden = 100
 forget_bias = 1
 learning_rate = 0.001
-iterations = 2
-model_name = "first_pass_gan"
+iterations = 1000
+threads = 4
+model_name = "ascii_test"
 # output_dir = "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/test_gan"
-output_dir = os.path.abspath("models/test_gan")
+output_dir = os.path.abspath("models/ascii_test")
 # twitter_data_path = "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/example_tweet_data/train_csv"
 # trained_model_dir = "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/test_gan"
 twitter_data_path = os.path.abspath("example_tweet_data/train_csv")
-trained_model_dir = os.path.abspath("textGAN/models/test_gan")
+trained_model_dir = os.path.abspath("models/ascii_test")
 
-load_model = True
+load_model = False
 if load_model:
-    # model_path = tf.train.latest_checkpoint(trained_model_dir)
-    model_path = "models/test_gan/first_pass_gan-9766-19678"
+    model_path = tf.train.latest_checkpoint(trained_model_dir)
+    #model_path = "models/test_gan/first_pass_gan-9766-19678"
 else:
     model_path = os.path.join(output_dir, model_name)
 log.info("Model Path {}".format(model_path))
@@ -273,7 +299,7 @@ log.info("Model Path {}".format(model_path))
 
 file_list = list_dir(twitter_data_path, ext="csv")
 
-len_x, max_seq_len, ix_to_char, char_to_ix, all_tweets, all_seq_len = load_tweet_data([file_list[1]])
+len_x, max_seq_len, ix_to_char, char_to_ix, all_tweets, all_seq_len = load_tweet_data(file_list)
 
 stop_char_index = tf.get_variable('stop_char_index', [],
                                   initializer=tf.constant_initializer(char_to_ix[end_tweet_char]),
@@ -301,6 +327,9 @@ d_global_step = tf.get_variable(
 
 # create easily accessible training data
 training_data = TrainingData(all_tweets, all_seq_len, len_x, batch_size)
+training_data.start_threads(n_threads=threads)
+# x_batch, seq_batch = training_data.get_batch()
+# training_data.stop_threads()
 
 # create models
 Gz = generator(place_Z, max_seq_len, gen_n_hidden, batch_size)
@@ -355,6 +384,7 @@ variable_summaries(g_accuracy, "generator_accuracy")
 variable_summaries(d_accuracy, "discriminator_accuracy")
 all_summary = tf.summary.merge_all()
 
+
 # partition trainable variables
 tvars = tf.trainable_variables()
 d_vars = [var for var in tvars if 'discriminator_lstm' in var.name]
@@ -396,20 +426,25 @@ with tf.Session(config=config) as sess:
         x_batch, seq_batch = training_data.get_batch()
         z_batch = np.random.normal(0, 1, size=[batch_size, len_x])
         if step == 0:
-            _, gLoss = sess.run([trainerG, g_loss], feed_dict={place_Z: z_batch})
+            _, gLoss, gAccuracy = sess.run([trainerG, g_loss, g_accuracy], feed_dict={place_Z: z_batch})
             _, dLoss = sess.run([trainerD, d_loss],
                                 feed_dict={place_Z: z_batch, place_X: x_batch, place_Seq: seq_batch})
+            x_batch, seq_batch = training_data.get_batch()
+            z_batch = np.random.normal(0, 1, size=[batch_size, len_x])
             step += 2
-        if dLoss < gLoss:
-            _, gLoss = sess.run([trainerG, g_loss], feed_dict={place_Z: z_batch})
+
+        if gAccuracy < 0.4:
+            _, gAccuracy = sess.run([trainerG, gAccuracy], feed_dict={place_Z: z_batch})
+            step += 1
+        if gAccuracy > 0.9:
+            _, gAccuracy = sess.run([trainerD, gAccuracy],
+                                feed_dict={place_Z: z_batch, place_X: x_batch, place_Seq: seq_batch})
             step += 1
         else:
             _, dLoss = sess.run([trainerD, d_loss],
                                 feed_dict={place_Z: z_batch, place_X: x_batch, place_Seq: seq_batch})
-            step += 1
-        if gLoss > 2:
             _, gLoss = sess.run([trainerG, g_loss], feed_dict={place_Z: z_batch})
-            step += 1
+            step += 2
 
         if step % 10 == 0:
             summary_info, d_step, g_step = sess.run([all_summary, d_global_step, g_global_step],
@@ -431,4 +466,5 @@ with tf.Session(config=config) as sess:
                 except ValueError:
                     print(repr(sentence))
 
+training_data.stop_threads()
 log.info("Finished Training")
