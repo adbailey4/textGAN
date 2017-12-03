@@ -434,16 +434,16 @@ with tf.Session(config=config) as sess:
             step += 2
 
         if gAccuracy < 0.2:
-            _, gAccuracy = sess.run([trainerG, gAccuracy], feed_dict={place_Z: z_batch})
+            _, gAccuracy = sess.run([trainerG, g_accuracy], feed_dict={place_Z: z_batch})
             step += 1
         if gAccuracy > 0.9:
-            _, gAccuracy = sess.run([trainerD, gAccuracy],
+            _, gAccuracy = sess.run([trainerD, g_accuracy],
                                     feed_dict={place_Z: z_batch, place_X: x_batch, place_Seq: seq_batch})
             step += 1
         else:
-            _, gAccuracy = sess.run([trainerD, gAccuracy],
+            _, gAccuracy = sess.run([trainerD, g_accuracy],
                                     feed_dict={place_Z: z_batch, place_X: x_batch, place_Seq: seq_batch})
-            _, gAccuracy = sess.run([trainerG, gAccuracy], feed_dict={place_Z: z_batch})
+            _, gAccuracy = sess.run([trainerG, g_accuracy], feed_dict={place_Z: z_batch})
             step += 2
 
         if step % 10 == 0:
