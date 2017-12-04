@@ -138,7 +138,8 @@ def load_tweet_data(file_list, reduction_level, end_tweet_char=u'\u26D4'):
     return len_x, seq_len, ix_to_char, char_to_ix, all_tweets, all_seq_len
 
 
-def generator(input_vector, max_seq_len, n_hidden, batch_size, forget_bias=1, dropout=False, output_keep_prob=1, reuse=False):
+def generator(input_vector, max_seq_len, n_hidden, batch_size, forget_bias=1, dropout=False, output_keep_prob=1,
+              reuse=False):
     """Feeds output from lstm into input of same lstm cell"""
     with tf.variable_scope("gan_generator", reuse=tf.AUTO_REUSE):
         # make new lstm cell for every step
@@ -245,6 +246,9 @@ class TrainingData(object):
 
     def __init__(self, all_tweets, all_seq_len, len_x, batch_size, char_to_ix, end_tweet_char, gen_pretrain=False):
         self.all_tweets = all_tweets
+        self.len_all_tweets = len(all_tweets)
+        self.tweet_queue = queue.Queue(maxsize=100000)
+        self.index = 0
         self.all_seq_len = all_seq_len
         self.len_x = len_x
         self.max_seq_len = max(all_seq_len)
@@ -275,13 +279,12 @@ class TrainingData(object):
             seq_batch = []
             for i in range(self.batch_size):
                 vector_tweet = np.zeros([self.max_seq_len, self.len_x])
-                for indx, char in enumerate(np.random.choice(self.all_tweets)):
+                for indx, char in enumerate(self.tweet_queue.get()):
                     vector_tweet[indx, self.char_to_ix[char]] = 1
                 # add tweet ending character to tweet
                 vector_tweet[indx + 1, self.char_to_ix[self.end_tweet_char]] = 1
                 x_batch.append(vector_tweet)
                 seq_batch.append(indx + 2)
-
             self.queue.put([np.asarray(x_batch), np.asarray(seq_batch)])
 
     def pretrain_generator_read_in_batches(self, stop_event):
@@ -293,22 +296,34 @@ class TrainingData(object):
             for i in range(self.batch_size):
                 vector_tweet = np.zeros([self.max_seq_len, self.len_x])
                 label_tweet = np.zeros([self.max_seq_len, self.len_x])
-                tweet = np.random.choice(self.all_tweets)
+                tweet = self.tweet_queue.get()
                 for indx, char in enumerate(tweet):
                     vector_tweet[indx, self.char_to_ix[char]] = 1
-                    if indx == len(tweet)-1:
+                    if indx == len(tweet) - 1:
                         label_tweet[indx, self.char_to_ix[self.end_tweet_char]] = 1
                     else:
                         label_tweet[indx, self.char_to_ix[tweet[indx + 1]]] = 1
-                    # add tweet ending character to tweet
+                        # add tweet ending character to tweet
                 x_batch.append(vector_tweet)
                 seq_batch.append(indx + 1)
                 y_batch.append(label_tweet)
             self.queue.put([np.asarray(x_batch), np.asarray(seq_batch), np.asarray(y_batch)])
 
+    def load_tweet_queue(self, stop_event):
+        """Load tweets into queue"""
+        while not stop_event.is_set():
+            for tweet in self.all_tweets:
+                self.tweet_queue.put(tweet)
+            np.random.shuffle(self.all_tweets)
+
     def start_threads(self, n_threads=1):
         """ Start background threads to feed queue """
         threads = []
+        # make thread to shuffle and input tweets into tweet queue
+        t = threading.Thread(target=self.load_tweet_queue, args=(self.stop_event,))
+        t.daemon = True  # thread will close when parent quits
+        t.start()
+        threads.append(t)
         for n in range(n_threads):
             t = threading.Thread(target=self.target, args=(self.stop_event,))
             t.daemon = True  # thread will close when parent quits
@@ -321,7 +336,8 @@ class TrainingData(object):
         self.stop_event.set()
 
 
-def load_pretrained_generator_model(batch_size, len_x, max_seq_len, gen_n_hidden, forget_bias, ix_to_char, end_tweet_char):
+def load_pretrained_generator_model(batch_size, len_x, max_seq_len, gen_n_hidden, forget_bias, ix_to_char,
+                                    end_tweet_char):
     """Load a pretrained generator model and output text with a random input"""
 
     place_Z = tf.placeholder(tf.float32, shape=[None, len_x], name='Label')
@@ -343,12 +359,10 @@ def load_pretrained_generator_model(batch_size, len_x, max_seq_len, gen_n_hidden
         g_vars = [var for var in tvars if 'pretrain_g_lstm' in var.name]
         print(g_vars)
 
-
         assignment = []
         for i, var in enumerate(post_vars):
             print(var, g_vars[i])
             assignment.append(var.assign(g_vars[i]))
-
 
         kernel1, kernel2, bias1, bias2 = sess.run([g_vars[0], post_vars[0], g_vars[1], post_vars[1]])
         print("kernel", kernel1[0][0])
@@ -372,14 +386,14 @@ def load_pretrained_generator_model(batch_size, len_x, max_seq_len, gen_n_hidden
             except ValueError:
                 print(repr(tweet))
 
-    # ignore this but there are usefull commands here so I am keeping them commented out
-    # saver = tf.train.import_meta_graph('models/pretrain_testing/discriminator-200-400-510-520.meta')
-    # # We can now access the default graph where all our metadata has been loaded
-    # graph = tf.get_default_graph()
-    # for op in graph.get_operations():
-    # g_predict = graph.get_operation_by_name('g_predict')
-    # v = tf.get_variable("g_global_step")
-    # output_conv_sg = tf.stop_gradient(output_conv) # It's an identity function
+                # ignore this but there are usefull commands here so I am keeping them commented out
+                # saver = tf.train.import_meta_graph('models/pretrain_testing/discriminator-200-400-510-520.meta')
+                # # We can now access the default graph where all our metadata has been loaded
+                # graph = tf.get_default_graph()
+                # for op in graph.get_operations():
+                # g_predict = graph.get_operation_by_name('g_predict')
+                # v = tf.get_variable("g_global_step")
+                # output_conv_sg = tf.stop_gradient(output_conv) # It's an identity function
 
 
 def main():
@@ -412,7 +426,7 @@ def main():
     ##################################
 
     file_list = list_dir(twitter_data_path, ext="csv")
-    len_x, max_seq_len, ix_to_char, char_to_ix, all_tweets, all_seq_len = load_tweet_data([file_list[1]],
+    len_x, max_seq_len, ix_to_char, char_to_ix, all_tweets, all_seq_len = load_tweet_data(file_list,
                                                                                           reduction_level=reduction_level)
 
     gen_n_hidden = len_x
@@ -420,8 +434,8 @@ def main():
     test_pretrain_generator = False
 
     if test_pretrain_generator:
-        load_pretrained_generator_model(batch_size, len_x, max_seq_len, gen_n_hidden, forget_bias, ix_to_char, end_tweet_char)
-
+        load_pretrained_generator_model(batch_size, len_x, max_seq_len, gen_n_hidden, forget_bias, ix_to_char,
+                                        end_tweet_char)
 
     stop_char_index = tf.get_variable('stop_char_index', [],
                                       initializer=tf.constant_initializer(char_to_ix[end_tweet_char]),
@@ -441,14 +455,10 @@ def main():
         'g_global_step', [],
         initializer=tf.constant_initializer(0), trainable=False)
 
-
     # create easily accessible training data
     training_data = TrainingData(all_tweets, all_seq_len, len_x, batch_size, char_to_ix=char_to_ix,
                                  end_tweet_char=end_tweet_char, gen_pretrain=True)
     training_data.start_threads(n_threads=threads)
-    if test_pretrain_generator:
-        load_pretrained_generator_model(batch_size, len_x, max_seq_len, gen_n_hidden, forget_bias, ix_to_char, end_tweet_char)
-
     # create models
     Gz = pretrain_generator(place_X, place_Seq, gen_n_hidden, batch_size, forget_bias=forget_bias)
 
@@ -508,8 +518,8 @@ def main():
             x_batch, seq_batch, y_batch = training_data.get_batch()
             # z_batch = np.random.normal(0, 1, size=[batch_size, len_x])
             _, gLoss = sess.run([trainerG, g_loss], feed_dict={place_X: x_batch,
-                                                                                      place_Seq: seq_batch,
-                                                                                     place_Y: y_batch})
+                                                               place_Seq: seq_batch,
+                                                               place_Y: y_batch})
             # print(gPredict)
             # print(gAccuracy)
             # print(gLoss)
