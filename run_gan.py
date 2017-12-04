@@ -140,7 +140,7 @@ def load_tweet_data(file_list, reduction_level, end_tweet_char=u'\u26D4'):
 
 def generator(input_vector, max_seq_len, n_hidden, batch_size, forget_bias=1, dropout=False, output_keep_prob=1):
     """Feeds output from lstm into input of same lstm cell"""
-    with tf.variable_scope("generator_lstm"):
+    with tf.variable_scope("gan_generator"):
         # make new lstm cell for every step
         cell = tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias)
         def make_cell(cell, input_vector, state, dropout):
@@ -161,27 +161,6 @@ def generator(input_vector, max_seq_len, n_hidden, batch_size, forget_bias=1, dr
         output = tf.stack(outputs, 1)
 
     return output
-
-
-def pretrain_generator(input_vector, sequence_length_placeholder, n_hidden,
-                       batch_size, forget_bias=1, dropout=False, output_keep_prob=1):
-    """Generator function used to pretrain a generator network"""
-    with tf.variable_scope("generator_lstm", reuse=reuse):
-        cell = tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias, state_is_tuple=True)
-        if dropout and output_keep_prob < 1:
-            cell = tf.contrib.rnn.DropoutWrapper(
-                cell, output_keep_prob=output_keep_prob)
-        # 'outputs' is a tensor of shape [batch_size, max_time, 256]
-        # 'state' is a N-tuple where N is the number of LSTMCells containing a
-        # tf.contrib.rnn.LSTMStateTuple for each cell
-        output, _ = tf.nn.dynamic_rnn(cell=cell,
-                                      inputs=input_vector,
-                                      dtype=tf.float32,
-                                      time_major=False,
-                                      sequence_length=sequence_length_placeholder)
-        final_output = tf.sigmoid(output)
-        return final_output
-
 
 
 def fulconn_layer(input_data, output_dim, seq_len=1, activation_func=None):
@@ -333,7 +312,7 @@ def main():
     iterations = 1000
     threads = 4
     reduction_level = RL_HIGH
-    model_name = "discriminator"
+    model_name = "load_pretrain_gan"
     # output_dir = "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/test_gan"
     output_dir = os.path.abspath("models/one_cell_generator")
     # twitter_data_path = "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/example_tweet_data/train_csv"
@@ -341,7 +320,11 @@ def main():
     twitter_data_path = os.path.abspath("example_tweet_data/train_csv")
     trained_model_dir = os.path.abspath("models/one_cell_generator")
 
-    load_model = False
+    load_model = True
+    load_pretrain_gan = True
+    pretrain_gen_path = tf.train.latest_checkpoint('models/gen_pretrain/')
+    gan_meta = 'models/gen_pretrain/pretrain_generator-100.meta'
+
     if load_model:
         model_path = tf.train.latest_checkpoint(trained_model_dir)
         # model_path = "models/test_gan/first_pass_gan-9766-19678"
@@ -442,7 +425,7 @@ def main():
     # partition trainable variables
     tvars = tf.trainable_variables()
     d_vars = [var for var in tvars if 'discriminator_lstm' in var.name]
-    g_vars = [var for var in tvars if 'generator_lstm' in var.name]
+    g_vars = [var for var in tvars if 'gan_generator' in var.name]
 
     # define optimizers
     opt = tf.train.AdamOptimizer(learning_rate=learning_rate)
@@ -456,6 +439,8 @@ def main():
     config = tf.ConfigProto(log_device_placement=False,
                             intra_op_parallelism_threads=8,
                             allow_soft_placement=True)
+    all_vars = tf.global_variables()
+    print(all_vars)
 
     with tf.Session(config=config) as sess:
         if load_model:
@@ -465,13 +450,40 @@ def main():
             write_graph = False
             log.info("Loaded Model: {}".format(trained_model_dir))
         else:
-            # initialize
-            writer = tf.summary.FileWriter(output_dir, sess.graph)
-            sess.run(tf.global_variables_initializer())
-            saver = tf.train.Saver(max_to_keep=4, keep_checkpoint_every_n_hours=2)
-            saver.save(sess, model_path,
-                       global_step=d_global_step + g_global_step)
-            write_graph = True
+            if load_pretrain_gan:
+                writer = tf.summary.FileWriter(output_dir, sess.graph)
+                sess.run(tf.global_variables_initializer())
+                saver = tf.train.import_meta_graph(gan_meta)
+                saver.restore(sess, pretrain_gen_path)
+                tvars = tf.trainable_variables()
+                pretrain_vars = [var for var in tvars if 'pretrain_g_lstm' in var.name]
+
+                # assign weights and bias to newly created lstm
+                assignment = []
+                for i, var in enumerate(g_vars):
+                    print(var, pretrain_vars[i])
+                    assignment.append(var.assign(pretrain_vars[i]))
+                # some testing to make sure new bias and weights are correct
+                kernel1, kernel2, bias1, bias2 = sess.run([pretrain_vars[0], g_vars[0], pretrain_vars[1], g_vars[1]])
+                assert (kernel1 != kernel2).all()
+                assert (bias1 != bias2).all()
+                sess.run(assignment)
+                kernel1, kernel2, bias1, bias2 = sess.run([pretrain_vars[0], g_vars[0], pretrain_vars[1], g_vars[1]])
+                assert (kernel1 == kernel2).all()
+                assert (bias1 == bias2).all()
+                write_graph = False
+                saver = tf.train.Saver(var_list=all_vars, max_to_keep=4, keep_checkpoint_every_n_hours=2)
+                saver.save(sess, model_path,
+                           global_step=d_global_step + g_global_step, write_meta_graph=True)
+
+            else:
+                # initialize
+                writer = tf.summary.FileWriter(output_dir, sess.graph)
+                sess.run(tf.global_variables_initializer())
+                saver = tf.train.Saver(max_to_keep=4, keep_checkpoint_every_n_hours=2)
+                saver.save(sess, model_path,
+                           global_step=d_global_step + g_global_step, write_meta_graph=True)
+                write_graph = False
 
         # start training
         log.info("Started Training")
