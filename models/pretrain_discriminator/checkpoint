@@ -1,0 +1,4 @@
+model_checkpoint_path: "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/pretrain_discriminator/pretrain_discriminator-800-1100"
+all_model_checkpoint_paths: "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/pretrain_discriminator/pretrain_discriminator-800-900"
+all_model_checkpoint_paths: "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/pretrain_discriminator/pretrain_discriminator-800-1000"
+all_model_checkpoint_paths: "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/pretrain_discriminator/pretrain_discriminator-800-1100"

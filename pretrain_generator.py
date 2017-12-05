@@ -386,14 +386,14 @@ def load_pretrained_generator_model(batch_size, len_x, max_seq_len, gen_n_hidden
             except ValueError:
                 print(repr(tweet))
 
-                # ignore this but there are usefull commands here so I am keeping them commented out
-                # saver = tf.train.import_meta_graph('models/pretrain_testing/discriminator-200-400-510-520.meta')
-                # # We can now access the default graph where all our metadata has been loaded
-                # graph = tf.get_default_graph()
-                # for op in graph.get_operations():
-                # g_predict = graph.get_operation_by_name('g_predict')
-                # v = tf.get_variable("g_global_step")
-                # output_conv_sg = tf.stop_gradient(output_conv) # It's an identity function
+        # ignore this but there are usefull commands here so I am keeping them commented out
+        # saver = tf.train.import_meta_graph('models/pretrain_testing/discriminator-200-400-510-520.meta')
+        # # We can now access the default graph where all our metadata has been loaded
+        # graph = tf.get_default_graph()
+        # for op in graph.get_operations():
+        # g_predict = graph.get_operation_by_name('g_predict')
+        # v = tf.get_variable("g_global_step")
+        # output_conv_sg = tf.stop_gradient(output_conv) # It's an identity function
 
 
 def main():
