@@ -31,7 +31,7 @@ try:
 except ImportError:
     import queue
 
-from run_gan import pretrain_generator, load_tweet_data, list_dir, TrainingData, variable_summaries
+from run_gan import pretrain_generator, load_tweet_data, list_dir, TrainingData, variable_summaries, Hyperparameters
 # reduction level definitions
 RL_NONE = 0
 RL_LOW = 1
@@ -42,36 +42,26 @@ RL_HIGH = 3
 def main():
     ##################################
     # define hyperparameters
-    log.basicConfig(format='%(levelname)s:%(message)s', level=log.DEBUG)
-    end_tweet_char = u'\u26D4'
     batch_size = 100
-    d_n_hidden = 100
-    forget_bias = 1
     learning_rate = 0.001
     iterations = 1000
     threads = 4
-    reduction_level = RL_HIGH
-    model_name = "pretrain_generator"
-    # output_dir = "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/test_gan"
-    output_dir = os.path.abspath("models/gen_pretrain")
-    # twitter_data_path = "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/example_tweet_data/train_csv"
-    # trained_model_dir = "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/test_gan"
-    twitter_data_path = os.path.abspath("example_tweet_data/train_csv")
-    trained_model_dir = os.path.abspath("models/gen_pretrain")
-
+    ####
+    params = Hyperparameters()
+    ####
     load_model = False
+    #####
     if load_model:
-        model_path = tf.train.latest_checkpoint(trained_model_dir)
-        # model_path = "models/test_gan/first_pass_gan-9766-19678"
+        model_path = tf.train.latest_checkpoint(params.g_trained_model_dir)
     else:
-        model_path = os.path.join(output_dir, model_name)
+        model_path = os.path.join(params.g_output_dir, params.g_model_name)
     log.info("Model Path {}".format(model_path))
 
     ##################################
 
-    file_list = list_dir(twitter_data_path, ext="csv")
-    len_x, max_seq_len, ix_to_char, char_to_ix, all_tweets, all_seq_len = load_tweet_data(file_list,
-                                                                                          reduction_level=reduction_level)
+    file_list = list_dir(params.twitter_data_path, ext="csv")
+    len_x, max_seq_len, ix_to_char, char_to_ix, all_tweets, all_seq_len = \
+        load_tweet_data(file_list, reduction_level=params.reduction_level)
 
     gen_n_hidden = len_x
 
@@ -87,12 +77,13 @@ def main():
 
     # create easily accessible training data
     training_data = TrainingData(all_tweets, all_seq_len, len_x, batch_size, char_to_ix=char_to_ix,
-                                 end_tweet_char=end_tweet_char, gen_pretrain=True)
+                                 end_tweet_char=params.end_tweet_char, gen_pretrain=True)
     training_data.start_threads(n_threads=threads)
     # create models
-    Gz = pretrain_generator(place_X, place_Seq, gen_n_hidden, batch_size, forget_bias=forget_bias)
+    Gz = pretrain_generator(place_X, place_Seq, params.g_layers, max_seq_len=max_seq_len, len_x=len_x,
+                            forget_bias=params.g_forget_bias,
+                            dropout=params.g_dropout, output_keep_prob=params.g_drop_prob)
 
-    # Gz = generator(place_Z, max_seq_len, gen_n_hidden, batch_size, forget_bias=forget_bias)
     log.info("Generator Model Built")
 
     # generator sentences
@@ -127,14 +118,14 @@ def main():
 
     with tf.Session(config=config) as sess:
         if load_model:
-            writer = tf.summary.FileWriter(trained_model_dir, sess.graph)
+            writer = tf.summary.FileWriter(params.g_trained_model_dir, sess.graph)
             saver = tf.train.Saver(max_to_keep=4, keep_checkpoint_every_n_hours=2)
             saver.restore(sess, model_path)
             write_graph = True
             log.info("Loaded Model: {}".format(trained_model_dir))
         else:
             # initialize
-            writer = tf.summary.FileWriter(output_dir, sess.graph)
+            writer = tf.summary.FileWriter(params.g_output_dir, sess.graph)
             sess.run(tf.global_variables_initializer())
             saver = tf.train.Saver(max_to_keep=4, keep_checkpoint_every_n_hours=2)
             saver.save(sess, model_path,
