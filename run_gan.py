@@ -140,49 +140,53 @@ def load_tweet_data(file_list, reduction_level, end_tweet_char=u'\u26D4'):
     return len_x, seq_len, ix_to_char, char_to_ix, all_tweets, all_seq_len
 
 
-def generator(input_vector, max_seq_len, n_hidden, batch_size, forget_bias=1, dropout=False, output_keep_prob=1):
+def generator(input_vector, max_seq_len, g_layers, batch_size, len_x, forget_bias=1, dropout=False, output_keep_prob=1):
     """Feeds output from lstm into input of same lstm cell"""
     with tf.variable_scope("gan_generator"):
         # make new lstm cell for every step
-        cell = tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias)
+        cells = [tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias, state_is_tuple=True)
+                 for n_hidden in g_layers]
+        if dropout and output_keep_prob < 1:
+            cells = [tf.nn.rnn_cell.DropoutWrapper(cell, input_keep_prob=output_keep_prob) for cell in cells]
+        multi_rnn_cell = tf.nn.rnn_cell.MultiRNNCell(cells)
+        states = [tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias).zero_state(batch_size, tf.float32)
+                  for n_hidden in g_layers]
 
-        def make_cell(cell, input_vector, state, dropout):
-            if dropout and output_keep_prob < 1:
-                cell = tf.contrib.rnn.DropoutWrapper(
-                    cell, output_keep_prob=output_keep_prob)
-            return cell(inputs=input_vector, state=state)
-
-        state = tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias).zero_state(batch_size, tf.float32)
         outputs = []
         for time_step in range(max_seq_len):
             if time_step > 0:
                 tf.get_variable_scope().reuse_variables()
-            (cell_output, state) = make_cell(cell, input_vector, state, dropout=dropout)
-            outputs.append(cell_output)
-            input_vector = tf.tanh(cell_output)
+            cell_output, states = multi_rnn_cell(inputs=input_vector, state=states)
+            final_output, _, _ = fulconn_layer(cell_output, len_x, activation_func=tf.tanh)
+            outputs.append(final_output)
+
         # print(outputs)
         output = tf.stack(outputs, 1)
 
     return output
 
 
-def pretrain_generator(input_vector, sequence_length_placeholder, n_hidden,
-                       batch_size, forget_bias=1, dropout=False, output_keep_prob=1):
+def pretrain_generator(input_vector, sequence_length_placeholder, g_layers, max_seq_len, len_x, forget_bias=1,
+                       dropout=False, output_keep_prob=1):
     """Generator function used to pretrain a generator network"""
     with tf.variable_scope("pretrain_g_lstm"):
-        cell = tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias, state_is_tuple=True)
+        cells = [tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias, state_is_tuple=True) for n_hidden in g_layers]
         if dropout and output_keep_prob < 1:
-            cell = tf.contrib.rnn.DropoutWrapper(
-                cell, output_keep_prob=output_keep_prob)
+            cells = [tf.nn.rnn_cell.DropoutWrapper(cell, input_keep_prob=output_keep_prob) for cell in cells]
+        multi_rnn_cell = tf.nn.rnn_cell.MultiRNNCell(cells)
         # 'outputs' is a tensor of shape [batch_size, max_time, 256]
         # 'state' is a N-tuple where N is the number of LSTMCells containing a
         # tf.contrib.rnn.LSTMStateTuple for each cell
-        output, _ = tf.nn.dynamic_rnn(cell=cell,
+        output, _ = tf.nn.dynamic_rnn(cell=multi_rnn_cell,
                                       inputs=input_vector,
                                       dtype=tf.float32,
                                       time_major=False,
                                       sequence_length=sequence_length_placeholder)
-        final_output = tf.tanh(output)
+        # get output
+        output = tf.reshape(output, shape=[-1, g_layers[-1]])
+        final_output, _, _ = fulconn_layer(output, len_x, activation_func=tf.tanh)
+        # Reshape output back into [batch_size, max_seq_len, len_x]
+        final_output = tf.reshape(final_output, shape=[-1, max_seq_len, len_x])
         return final_output
 
 
@@ -207,36 +211,19 @@ def fulconn_layer(input_data, output_dim, seq_len=1, activation_func=None):
     return output, weight, bias
 
 
-def discriminator(input_vector, sequence_length_placeholder, n_hidden, len_y, forget_bias=5, reuse=False):
+def discriminator(input_vector, sequence_length_placeholder, d_layers, len_y, forget_bias=5, reuse=False,
+                  name="discriminator_lstm", dropout=False, output_keep_prob=1):
     """Feeds output from lstm into input of same lstm cell"""
-    with tf.variable_scope("discriminator_lstm", reuse=reuse):
-        cells = tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias, state_is_tuple=True)
+    with tf.variable_scope(name, reuse=reuse):
+        cells = [tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias, state_is_tuple=True) for n_hidden in d_layers]
+        if dropout and output_keep_prob < 1:
+            cells = [tf.nn.rnn_cell.DropoutWrapper(cell, input_keep_prob=output_keep_prob) for cell in cells]
+
+        multi_rnn_cell = tf.nn.rnn_cell.MultiRNNCell(cells)
         # 'outputs' is a tensor of shape [batch_size, max_time, 256]
         # 'state' is a N-tuple where N is the number of LSTMCells containing a
         # tf.contrib.rnn.LSTMStateTuple for each cell
-        output, _ = tf.nn.dynamic_rnn(cell=cells,
-                                      inputs=input_vector,
-                                      dtype=tf.float32,
-                                      time_major=False,
-                                      sequence_length=sequence_length_placeholder)
-
-        batch_size = tf.shape(output)[0]
-        last_outputs = tf.gather_nd(output, tf.stack([tf.range(batch_size), sequence_length_placeholder - 1], axis=1))
-
-        with tf.variable_scope("final_full_conn_layer", reuse=tf.AUTO_REUSE):
-            final_output, weights, bias = fulconn_layer(input_data=last_outputs, output_dim=len_y)
-
-        return final_output
-
-
-def pretrain_discriminator(input_vector, sequence_length_placeholder, n_hidden, len_y, forget_bias=5, reuse=False):
-    """Feeds output from lstm into input of same lstm cell"""
-    with tf.variable_scope("pretrain_d_lstm", reuse=reuse):
-        rnn_layers = tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias, state_is_tuple=True)
-        # 'outputs' is a tensor of shape [batch_size, max_time, 256]
-        # 'state' is a N-tuple where N is the number of LSTMCells containing a
-        # tf.contrib.rnn.LSTMStateTuple for each cell
-        output, _ = tf.nn.dynamic_rnn(cell=rnn_layers,
+        output, _ = tf.nn.dynamic_rnn(cell=multi_rnn_cell,
                                       inputs=input_vector,
                                       dtype=tf.float32,
                                       time_major=False,
@@ -414,34 +401,56 @@ class TrainingData(object):
         self.stop_event.set()
 
 
+class Hyperparameters(object):
+    """Maintain Hyperparameters in class so they can be imported"""
+    def __init__(self):
+        self.end_tweet_char = u'\u26D4'
+        self.reduction_level = RL_HIGH
+        self.twitter_data_path = os.path.abspath("example_tweet_data/train_csv")
+
+        # discriminator vars
+        self.d_layers = [20, 20]
+        self.d_dropout = True
+        self.d_drop_prob = 0.1
+        self.d_forget_bias = 1
+        self.d_model_name = "pretrain_discriminator"
+        self.d_output_dir = os.path.abspath("models/pretrain_discriminator")
+        self.d_trained_model_dir = os.path.abspath("models/pretrain_discriminator")
+
+        # generator vars
+        self.g_layers = [10, 25]
+        self.g_forget_bias = 1
+        self.g_drop_prob = 0.1
+        self.g_dropout = True
+        self.g_model_name = "pretrain_generator"
+        self.g_output_dir = os.path.abspath("models/pretrain_generator")
+        self.g_trained_model_dir = os.path.abspath("models/pretrain_generator")
+
+
+
 def main():
+    log.basicConfig(format='%(levelname)s:%(message)s', level=log.DEBUG)
     ##################################
     # define hyperparameters
-    log.basicConfig(format='%(levelname)s:%(message)s', level=log.DEBUG)
-    end_tweet_char = u'\u26D4'
     batch_size = 10
-    d_n_hidden = 100
-    forget_bias = 1
     learning_rate = 0.001
     iterations = 1000
     threads = 4
-    reduction_level = RL_HIGH
+    # load hyperparams between pretrain graphs
+    params = Hyperparameters()
+
     model_name = "load_pretrain_gan"
-    # output_dir = "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/test_gan"
-    output_dir = os.path.abspath("models/one_cell_generator")
-    # twitter_data_path = "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/example_tweet_data/train_csv"
-    # trained_model_dir = "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/test_gan"
-    twitter_data_path = os.path.abspath("example_tweet_data/train_csv")
-    trained_model_dir = os.path.abspath("models/one_cell_generator")
+    output_dir = os.path.abspath("models/multi_cell_GANs")
+    trained_model_dir = os.path.abspath("models/multi_cell_GANs")
 
     load_model = False
     load_pretrain_gen = True
     load_pretrain_dis = True
 
-    pretrain_gen_path = tf.train.latest_checkpoint('models/gen_pretrain/')
-    gan_meta = 'models/gen_pretrain/pretrain_generator-100.meta'
-    pretrain_dis_path = tf.train.latest_checkpoint('models/pretrain_discriminator/')
-    dis_meta = 'models/pretrain_discriminator/pretrain_discriminator-800-900.meta'
+    pretrain_gen_path = tf.train.latest_checkpoint(params.g_trained_model_dir)
+    gan_meta = 'models/pretrain_generator/pretrain_generator-0.meta'
+    pretrain_dis_path = tf.train.latest_checkpoint(params.d_trained_model_dir)
+    dis_meta = 'models/pretrain_discriminator/pretrain_discriminator-0.meta'
 
     if load_model:
         model_path = tf.train.latest_checkpoint(trained_model_dir)
@@ -452,13 +461,13 @@ def main():
 
     ##################################
 
-    file_list = list_dir(twitter_data_path, ext="csv")
+    file_list = list_dir(params.twitter_data_path, ext="csv")
 
-    len_x, max_seq_len, ix_to_char, char_to_ix, all_tweets, all_seq_len = load_tweet_data([file_list[1]],
-                                                                                          reduction_level=reduction_level)
+    len_x, max_seq_len, ix_to_char, char_to_ix, all_tweets, all_seq_len = \
+        load_tweet_data(file_list, reduction_level=params.reduction_level)
 
     stop_char_index = tf.get_variable('stop_char_index', [],
-                                      initializer=tf.constant_initializer(char_to_ix[end_tweet_char]),
+                                      initializer=tf.constant_initializer(char_to_ix[params.end_tweet_char]),
                                       trainable=False, dtype=tf.int64)
 
     max_seq_len_tensor = tf.get_variable('max_seq_len', [],
@@ -483,13 +492,14 @@ def main():
 
     # create easily accessible training data
     training_data = TrainingData(all_tweets, all_seq_len, len_x, batch_size, char_to_ix=char_to_ix,
-                                 end_tweet_char=end_tweet_char, gen_pretrain=False)
+                                 end_tweet_char=params.end_tweet_char, gen_pretrain=False)
     training_data.start_threads(n_threads=threads)
     # training_data.stop_threads()
 
 
     # create models
-    Gz = generator(place_Z, max_seq_len, gen_n_hidden, batch_size, forget_bias=forget_bias)
+    Gz = generator(place_Z, max_seq_len, params.g_layers, batch_size, len_x=len_x, forget_bias=params.g_forget_bias,
+                   dropout=params.g_dropout, output_keep_prob=params.g_drop_prob)
     log.info("Generator Model Built")
 
     def index1d(t):
@@ -504,11 +514,13 @@ def main():
     # length of the sequence for the generator network based on termination character
     z_seq_length = tf.map_fn(index1d, gen_char_index, dtype=tf.int32, back_prop=False)
     # discriminator for generator output
-    Dg = discriminator(Gz, z_seq_length, d_n_hidden, len_y, forget_bias=forget_bias, reuse=False)
+    Dg = discriminator(Gz, z_seq_length, params.d_layers, len_y, forget_bias=params.d_forget_bias, reuse=False,
+                       dropout=params.d_dropout, output_keep_prob=params.d_drop_prob)
     log.info("1st Discriminator Model Built")
 
     # discriminator for twitter data
-    Dx = discriminator(place_X, place_Seq, d_n_hidden, len_y, forget_bias=forget_bias, reuse=True)
+    Dx = discriminator(place_X, place_Seq, params.d_layers, len_y, forget_bias=params.d_forget_bias, reuse=True,
+                       dropout=params.d_dropout, output_keep_prob=params.d_drop_prob)
     log.info("2nd Discriminator Model Built")
 
     # generator sentences
@@ -584,10 +596,10 @@ def main():
                 kernel1, kernel2, bias1, bias2 = sess.run([pretrain_vars[0], g_vars[0], pretrain_vars[1], g_vars[1]])
                 assert (kernel1 != kernel2).all()
                 assert (bias1 != bias2).all()
-                print("kernel", kernel1[0][0])
-                print("bias", bias1[0])
-                print("kernel_1", kernel2[0][0])
-                print("bias_1", bias2[0])
+                # print("kernel", kernel1[0][0])
+                # print("bias", bias1[0])
+                # print("kernel_1", kernel2[0][0])
+                # print("bias_1", bias2[0])
 
                 sess.run(assignment)
                 kernel1, kernel2, bias1, bias2 = sess.run([pretrain_vars[0], g_vars[0], pretrain_vars[1], g_vars[1]])
@@ -702,7 +714,7 @@ def main():
                 if len(fake_tweets) != 0:
                     sentence = ''.join([ix_to_char[x] for x in fake_tweets[0]])
                     try:
-                        print(repr(sentence[:sentence.index(end_tweet_char) + 1]))
+                        print(repr(sentence[:sentence.index(params.end_tweet_char) + 1]))
                     except ValueError:
                         print(repr(sentence))
 
