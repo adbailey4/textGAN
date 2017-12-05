@@ -145,6 +145,7 @@ def generator(input_vector, max_seq_len, n_hidden, batch_size, forget_bias=1, dr
     with tf.variable_scope("gan_generator"):
         # make new lstm cell for every step
         cell = tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias)
+
         def make_cell(cell, input_vector, state, dropout):
             if dropout and output_keep_prob < 1:
                 cell = tf.contrib.rnn.DropoutWrapper(
@@ -158,11 +159,31 @@ def generator(input_vector, max_seq_len, n_hidden, batch_size, forget_bias=1, dr
                 tf.get_variable_scope().reuse_variables()
             (cell_output, state) = make_cell(cell, input_vector, state, dropout=dropout)
             outputs.append(cell_output)
-            input_vector = tf.sigmoid(cell_output)
+            input_vector = tf.tanh(cell_output)
         # print(outputs)
         output = tf.stack(outputs, 1)
 
     return output
+
+
+def pretrain_generator(input_vector, sequence_length_placeholder, n_hidden,
+                       batch_size, forget_bias=1, dropout=False, output_keep_prob=1):
+    """Generator function used to pretrain a generator network"""
+    with tf.variable_scope("pretrain_g_lstm"):
+        cell = tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias, state_is_tuple=True)
+        if dropout and output_keep_prob < 1:
+            cell = tf.contrib.rnn.DropoutWrapper(
+                cell, output_keep_prob=output_keep_prob)
+        # 'outputs' is a tensor of shape [batch_size, max_time, 256]
+        # 'state' is a N-tuple where N is the number of LSTMCells containing a
+        # tf.contrib.rnn.LSTMStateTuple for each cell
+        output, _ = tf.nn.dynamic_rnn(cell=cell,
+                                      inputs=input_vector,
+                                      dtype=tf.float32,
+                                      time_major=False,
+                                      sequence_length=sequence_length_placeholder)
+        final_output = tf.tanh(output)
+        return final_output
 
 
 def fulconn_layer(input_data, output_dim, seq_len=1, activation_func=None):
@@ -189,6 +210,28 @@ def fulconn_layer(input_data, output_dim, seq_len=1, activation_func=None):
 def discriminator(input_vector, sequence_length_placeholder, n_hidden, len_y, forget_bias=5, reuse=False):
     """Feeds output from lstm into input of same lstm cell"""
     with tf.variable_scope("discriminator_lstm", reuse=reuse):
+        cells = tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias, state_is_tuple=True)
+        # 'outputs' is a tensor of shape [batch_size, max_time, 256]
+        # 'state' is a N-tuple where N is the number of LSTMCells containing a
+        # tf.contrib.rnn.LSTMStateTuple for each cell
+        output, _ = tf.nn.dynamic_rnn(cell=cells,
+                                      inputs=input_vector,
+                                      dtype=tf.float32,
+                                      time_major=False,
+                                      sequence_length=sequence_length_placeholder)
+
+        batch_size = tf.shape(output)[0]
+        last_outputs = tf.gather_nd(output, tf.stack([tf.range(batch_size), sequence_length_placeholder - 1], axis=1))
+
+        with tf.variable_scope("final_full_conn_layer", reuse=tf.AUTO_REUSE):
+            final_output, weights, bias = fulconn_layer(input_data=last_outputs, output_dim=len_y)
+
+        return final_output
+
+
+def pretrain_discriminator(input_vector, sequence_length_placeholder, n_hidden, len_y, forget_bias=5, reuse=False):
+    """Feeds output from lstm into input of same lstm cell"""
+    with tf.variable_scope("pretrain_d_lstm", reuse=reuse):
         rnn_layers = tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias, state_is_tuple=True)
         # 'outputs' is a tensor of shape [batch_size, max_time, 256]
         # 'state' is a N-tuple where N is the number of LSTMCells containing a
@@ -224,8 +267,13 @@ def variable_summaries(var, name):
 class TrainingData(object):
     """Get batches from training dataset"""
 
-    def __init__(self, all_tweets, all_seq_len, len_x, batch_size, char_to_ix, end_tweet_char, gen_pretrain=False):
+    def __init__(self, all_tweets, all_seq_len, len_x, batch_size, char_to_ix, end_tweet_char, gen_pretrain=False,
+                 dis_pretrain=False, swap_prob=0.1):
         self.all_tweets = all_tweets
+        self.len_all_tweets = len(all_tweets)
+        self.tweet_queue = queue.Queue(maxsize=50000)
+        self.fake_tweet_queue = queue.Queue(maxsize=50000)
+        self.index = 0
         self.all_seq_len = all_seq_len
         self.len_x = len_x
         self.max_seq_len = max(all_seq_len)
@@ -235,16 +283,21 @@ class TrainingData(object):
         self.char_to_ix = char_to_ix
         self.queue = queue.Queue(maxsize=20)
         self.gen_pretrain = gen_pretrain
+        self.dis_pretrain = dis_pretrain
         self.end_tweet_char = end_tweet_char
+        # swap word probability used if pretrain discriminator
+        self.swap_prob = swap_prob
         if self.gen_pretrain:
             self.target = self.pretrain_generator_read_in_batches
+        elif self.dis_pretrain:
+            self.target = self.pretrain_discriminator_read_in_batches
         else:
             self.target = self.discriminator_read_in_batches
 
     def get_batch(self):
         """Get batch of data"""
         batch = self.queue.get()
-        if self.gen_pretrain:
+        if self.gen_pretrain or self.dis_pretrain:
             return batch[0], batch[1], batch[2]
         else:
             return batch[0], batch[1]
@@ -256,14 +309,40 @@ class TrainingData(object):
             seq_batch = []
             for i in range(self.batch_size):
                 vector_tweet = np.zeros([self.max_seq_len, self.len_x])
-                for indx, char in enumerate(np.random.choice(self.all_tweets)):
+                for indx, char in enumerate(self.tweet_queue.get()):
                     vector_tweet[indx, self.char_to_ix[char]] = 1
                 # add tweet ending character to tweet
                 vector_tweet[indx + 1, self.char_to_ix[self.end_tweet_char]] = 1
                 x_batch.append(vector_tweet)
                 seq_batch.append(indx + 2)
-
             self.queue.put([np.asarray(x_batch), np.asarray(seq_batch)])
+
+    def pretrain_discriminator_read_in_batches(self, stop_event):
+        """Read in data for pretraining the generator"""
+        while not stop_event.is_set():
+            x_batch = []
+            seq_batch = []
+            y_batch = []
+            for i in range(self.batch_size):
+                vector_tweet = np.zeros([self.max_seq_len, self.len_x])
+                for indx, char in enumerate(self.tweet_queue.get()):
+                    vector_tweet[indx, self.char_to_ix[char]] = 1
+                # add tweet ending character to tweet
+                vector_tweet[indx + 1, self.char_to_ix[self.end_tweet_char]] = 1
+                x_batch.append(vector_tweet)
+                seq_batch.append(indx + 2)
+                y_batch.append([1])
+                # create fake tweet
+                vector_tweet = np.zeros([self.max_seq_len, self.len_x])
+                for indx, char in enumerate(self.fake_tweet_queue.get()):
+                    vector_tweet[indx, self.char_to_ix[char]] = 1
+                # add tweet ending character to tweet
+                vector_tweet[indx + 1, self.char_to_ix[self.end_tweet_char]] = 1
+                x_batch.append(vector_tweet)
+                seq_batch.append(indx + 2)
+                y_batch.append([0])
+
+            self.queue.put([np.asarray(x_batch), np.asarray(seq_batch), np.asarray(y_batch)])
 
     def pretrain_generator_read_in_batches(self, stop_event):
         """Read in data for pretraining the generator"""
@@ -274,10 +353,10 @@ class TrainingData(object):
             for i in range(self.batch_size):
                 vector_tweet = np.zeros([self.max_seq_len, self.len_x])
                 label_tweet = np.zeros([self.max_seq_len, self.len_x])
-                tweet = np.random.choice(self.all_tweets)
+                tweet = self.tweet_queue.get()
                 for indx, char in enumerate(tweet):
                     vector_tweet[indx, self.char_to_ix[char]] = 1
-                    if indx == len(tweet)-1:
+                    if indx == len(tweet) - 1:
                         label_tweet[indx, self.char_to_ix[self.end_tweet_char]] = 1
                     else:
                         label_tweet[indx, self.char_to_ix[tweet[indx + 1]]] = 1
@@ -287,9 +366,42 @@ class TrainingData(object):
                 y_batch.append(label_tweet)
             self.queue.put([np.asarray(x_batch), np.asarray(seq_batch), np.asarray(y_batch)])
 
+    def load_tweet_queue(self, stop_event):
+        """Load tweets into queue"""
+        while not stop_event.is_set():
+            for tweet in self.all_tweets:
+                self.tweet_queue.put(tweet)
+                if self.dis_pretrain:
+                    fake_tweet = self.create_fake_tweet(tweet)
+                    if fake_tweet:
+                        self.fake_tweet_queue.put(fake_tweet)
+
+        np.random.shuffle(self.all_tweets)
+
+    def create_fake_tweet(self, tweet):
+        """Swap words in tweet"""
+        words = tweet.split()
+        if len(words) > 1:
+            n_swaps = int((len(words) * self.swap_prob)/2)
+            # print(len(words), prob, n_swaps)
+
+            index = np.random.choice(range(0, len(words)-1, 2), n_swaps, replace=False)
+            for i in index:
+                tmp_word = words[i]
+                words[i] = words[i+1]
+                words[i+1] = tmp_word
+            return ' '.join(words)
+        else:
+            return False
+
     def start_threads(self, n_threads=1):
         """ Start background threads to feed queue """
         threads = []
+        # make thread to shuffle and input tweets into tweet queue
+        t = threading.Thread(target=self.load_tweet_queue, args=(self.stop_event,))
+        t.daemon = True  # thread will close when parent quits
+        t.start()
+        threads.append(t)
         for n in range(n_threads):
             t = threading.Thread(target=self.target, args=(self.stop_event,))
             t.daemon = True  # thread will close when parent quits
@@ -472,41 +584,72 @@ def main():
                 kernel1, kernel2, bias1, bias2 = sess.run([pretrain_vars[0], g_vars[0], pretrain_vars[1], g_vars[1]])
                 assert (kernel1 != kernel2).all()
                 assert (bias1 != bias2).all()
+                print("kernel", kernel1[0][0])
+                print("bias", bias1[0])
+                print("kernel_1", kernel2[0][0])
+                print("bias_1", bias2[0])
+
                 sess.run(assignment)
                 kernel1, kernel2, bias1, bias2 = sess.run([pretrain_vars[0], g_vars[0], pretrain_vars[1], g_vars[1]])
                 assert (kernel1 == kernel2).all()
                 assert (bias1 == bias2).all()
+                # print("kernel", kernel1[0][0])
+                # print("bias", bias1[0])
+                # print("kernel_1", kernel2[0][0])
+                # print("bias_1", bias2[0])
+
                 log.info("Using weights from pre-trained Generator")
                 write_graph = False
 
-        if load_pretrain_dis:
-            sess.run(tf.global_variables_initializer())
-            # graph = tf.get_default_graph()
-            print(tf.global_variables())
-            saver = tf.train.import_meta_graph(dis_meta, import_scope="pretrain")
+            if load_pretrain_dis:
+                # uninitialized_variables = [tf.get_variable(name) for name in
+                #                            sess.run(tf.report_uninitialized_variables(tf.global_variables()))]
+                # print(uninitialized_variables)
+                # sess.run(tf.initialize_variables(uninitialized_variables))
 
-            saver.restore(sess, pretrain_dis_path)
-            tvars = tf.trainable_variables()
-            pretrain_dis_vars = [var for var in tvars if 'pretrain_d_lstm' in var.name]
+                # sess.run(tf.global_variables_initializer())
+                # graph = tf.get_default_graph()
+                # print(tf.global_variables())
+                saver = tf.train.import_meta_graph(dis_meta, import_scope="pretrain")
 
-            # assign weights and bias to newly created lstm
-            assignment = []
-            for i, var in enumerate(d_vars):
-                print(var, pretrain_dis_vars[i])
-                assignment.append(var.assign(pretrain_dis_vars[i]))
-            # some testing to make sure new bias and weights are correct
-            kernel1, kernel2, bias1, bias2 = sess.run([pretrain_dis_vars[0], d_vars[0], pretrain_dis_vars[1], d_vars[1]])
-            assert (kernel1 != kernel2).all()
-            assert (bias1 != bias2).all()
-            sess.run(assignment)
-            kernel1, kernel2, bias1, bias2 = sess.run([pretrain_dis_vars[0], d_vars[0], pretrain_dis_vars[1], d_vars[1]])
-            assert (kernel1 == kernel2).all()
-            assert (bias1 == bias2).all()
-            log.info("Using weights from pre-trained Discriminator")
-            write_graph = False
-            saver = tf.train.Saver(var_list=all_vars, max_to_keep=4, keep_checkpoint_every_n_hours=2)
-            saver.save(sess, model_path,
-                       global_step=d_global_step + g_global_step, write_meta_graph=True)
+                saver.restore(sess, pretrain_dis_path)
+                tvars = tf.trainable_variables()
+                pretrain_dis_vars = [var for var in tvars if 'pretrain_d_lstm' in var.name]
+
+                # assign weights and bias to newly created lstm
+                assignment = []
+                for i, var in enumerate(d_vars):
+                    print(var, pretrain_dis_vars[i])
+                    assignment.append(var.assign(pretrain_dis_vars[i]))
+                # some testing to make sure new bias and weights are correct
+                kernel1, kernel2, bias1, bias2 = sess.run([pretrain_vars[0], g_vars[0], pretrain_vars[1], g_vars[1]])
+                # print("kernel", kernel1[0][0])
+                # print("bias", bias1[0])
+                # print("kernel_1", kernel2[0][0])
+                # print("bias_1", bias2[0])
+
+                kernel1, kernel2, bias1, bias2 = sess.run([pretrain_dis_vars[0], d_vars[0], pretrain_dis_vars[1], d_vars[1]])
+                assert (kernel1 != kernel2).all()
+                assert (bias1 != bias2).all()
+                # print("kernel", kernel1[0][0])
+                # print("bias", bias1[0])
+                # print("kernel_1", kernel2[0][0])
+                # print("bias_1", bias2[0])
+
+                sess.run(assignment)
+                kernel1, kernel2, bias1, bias2 = sess.run([pretrain_dis_vars[0], d_vars[0], pretrain_dis_vars[1], d_vars[1]])
+                assert (kernel1 == kernel2).all()
+                assert (bias1 == bias2).all()
+                # print("kernel", kernel1[0][0])
+                # print("bias", bias1[0])
+                # print("kernel_1", kernel2[0][0])
+                # print("bias_1", bias2[0])
+
+                log.info("Using weights from pre-trained Discriminator")
+                write_graph = False
+                saver = tf.train.Saver(var_list=all_vars, max_to_keep=4, keep_checkpoint_every_n_hours=2)
+                saver.save(sess, model_path,
+                           global_step=d_global_step + g_global_step, write_meta_graph=True)
 
         if not load_pretrain_gen and not load_pretrain_dis:
                 # initialize
