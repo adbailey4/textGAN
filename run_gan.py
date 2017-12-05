@@ -147,7 +147,7 @@ def generator(input_vector, max_seq_len, g_layers, batch_size, len_x, forget_bia
         cells = [tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias, state_is_tuple=True)
                  for n_hidden in g_layers]
         if dropout and output_keep_prob < 1:
-            cells = [tf.nn.rnn_cell.DropoutWrapper(cell, input_keep_prob=output_keep_prob) for cell in cells]
+            cells = [tf.nn.rnn_cell.DropoutWrapper(cell, state_keep_prob=output_keep_prob) for cell in cells]
         multi_rnn_cell = tf.nn.rnn_cell.MultiRNNCell(cells)
         states = [tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias).zero_state(batch_size, tf.float32)
                   for n_hidden in g_layers]
@@ -172,7 +172,7 @@ def pretrain_generator(input_vector, sequence_length_placeholder, g_layers, max_
     with tf.variable_scope("pretrain_g_lstm"):
         cells = [tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias, state_is_tuple=True) for n_hidden in g_layers]
         if dropout and output_keep_prob < 1:
-            cells = [tf.nn.rnn_cell.DropoutWrapper(cell, input_keep_prob=output_keep_prob) for cell in cells]
+            cells = [tf.nn.rnn_cell.DropoutWrapper(cell, state_keep_prob=output_keep_prob) for cell in cells]
         multi_rnn_cell = tf.nn.rnn_cell.MultiRNNCell(cells)
         # 'outputs' is a tensor of shape [batch_size, max_time, 256]
         # 'state' is a N-tuple where N is the number of LSTMCells containing a
@@ -217,7 +217,7 @@ def discriminator(input_vector, sequence_length_placeholder, d_layers, len_y, fo
     with tf.variable_scope(name, reuse=reuse):
         cells = [tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias, state_is_tuple=True) for n_hidden in d_layers]
         if dropout and output_keep_prob < 1:
-            cells = [tf.nn.rnn_cell.DropoutWrapper(cell, input_keep_prob=output_keep_prob) for cell in cells]
+            cells = [tf.nn.rnn_cell.DropoutWrapper(cell, state_keep_prob=output_keep_prob) for cell in cells]
 
         multi_rnn_cell = tf.nn.rnn_cell.MultiRNNCell(cells)
         # 'outputs' is a tensor of shape [batch_size, max_time, 256]
@@ -409,18 +409,18 @@ class Hyperparameters(object):
         self.twitter_data_path = os.path.abspath("example_tweet_data/train_csv")
 
         # discriminator vars
-        self.d_layers = [20, 20]
+        self.d_layers = [200, 200, 200]
         self.d_dropout = True
-        self.d_drop_prob = 0.1
+        self.d_drop_prob = 0.9
         self.d_forget_bias = 1
         self.d_model_name = "pretrain_discriminator"
         self.d_output_dir = os.path.abspath("models/pretrain_discriminator")
         self.d_trained_model_dir = os.path.abspath("models/pretrain_discriminator")
 
         # generator vars
-        self.g_layers = [10, 25]
+        self.g_layers = [200, 200, 200]
         self.g_forget_bias = 1
-        self.g_drop_prob = 0.1
+        self.g_drop_prob = 0.9
         self.g_dropout = True
         self.g_model_name = "pretrain_generator"
         self.g_output_dir = os.path.abspath("models/pretrain_generator")
@@ -443,7 +443,7 @@ def main():
     output_dir = os.path.abspath("models/multi_cell_GANs")
     trained_model_dir = os.path.abspath("models/multi_cell_GANs")
 
-    load_model = False
+    load_model = True
     load_pretrain_gen = True
     load_pretrain_dis = True
 
