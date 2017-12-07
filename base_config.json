@@ -1,0 +1,18 @@
+{"d_model_name": "pretrain_discriminator",
+  "d_trained_model_dir": "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/pretrain_discriminator",
+  "d_forget_bias": 1,
+  "d_drop_prob": 0.9,
+  "g_dropout": true,
+  "g_forget_bias": 1,
+  "g_drop_prob": 0.9,
+  "reduction_level": 3,
+  "d_output_dir": "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/pretrain_discriminator",
+  "d_layers": [200, 200, 200],
+  "twitter_data_path": "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/example_tweet_data/train_csv",
+  "end_tweet_char": "\u26d4",
+  "d_dropout": true,
+  "g_model_name": "pretrain_generator",
+  "g_trained_model_dir": "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/pretrain_generator",
+  "g_layers": [200],
+  "g_output_dir": "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/pretrain_generator"
+}

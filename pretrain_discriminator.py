@@ -32,7 +32,8 @@ except ImportError:
     import queue
 
 
-from run_gan import discriminator, load_tweet_data, list_dir, TrainingData, variable_summaries, Hyperparameters
+from run_gan import discriminator, load_tweet_data, list_dir, TrainingData, variable_summaries, \
+    Hyperparameters, load_json, save_json, DotDict
 
 # reduction level definitions
 RL_NONE = 0
@@ -42,27 +43,23 @@ RL_HIGH = 3
 
 
 def main():
-    ##################################
-    # define hyperparameters
-    #########
-    batch_size = 10
+    log.basicConfig(format='%(levelname)s:%(message)s', level=log.DEBUG)
+    batch_size = 2
     learning_rate = 0.001
     iterations = 1000
     threads = 4
-    #########
-    params = Hyperparameters()
+    config_file = sys.argv[1]
+    ####
+    params = DotDict(load_json(config_file))
     ####
     load_model = False
-
+    #####
     if load_model:
-        model_path = tf.train.latest_checkpoint(params.d_trained_model_dir)
-        # model_path = "models/test_gan/first_pass_gan-9766-19678"
+        model_path = tf.train.latest_checkpoint(params.g_trained_model_dir)
     else:
-        model_path = os.path.join(params.d_output_dir, params.d_model_name)
-
+        model_path = os.path.join(params.g_output_dir, params.g_model_name)
     log.info("Model Path {}".format(model_path))
-
-    ##################################
+    save_json(params, model_path+".json")
 
     file_list = list_dir(params.twitter_data_path, ext="csv")
 
@@ -93,7 +90,10 @@ def main():
     log.info("Discriminator Model Built")
 
     # discriminator accuracy
-    d_accuracy = tf.reduce_mean(tf.cast(tf.equal(Dx, place_Y), tf.float32))
+    # d_accuracy = tf.reduce_mean(tf.cast(tf.equal(Dx, place_Y), tf.float32))
+    d_accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.sign(tf.nn.relu(Dx)), place_Y),
+                                        tf.float32), name="pretrain_g_accuracy")
+
     # calculate loss
     d_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=Dx, labels=place_Y))
     log.info("Created Loss function")

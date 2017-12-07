@@ -56,6 +56,13 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 training_labels = collections.namedtuple('training_data', ['input', 'seq_len'])
 
 
+class DotDict(dict):
+    """dot.notation access to dictionary attributes"""
+    __getattr__ = dict.get
+    __setattr__ = dict.__setitem__
+    __delattr__ = dict.__delitem__
+
+
 def list_dir(path, ext=""):
     """get all file paths from local directory with extension"""
     if ext == "":
@@ -68,6 +75,24 @@ def list_dir(path, ext=""):
                       os.path.isfile(os.path.join(os.path.abspath(path), f)) \
                       if f.split(".")[-1] == ext]
     return only_files
+
+
+def load_json(path):
+    """Load a json file and make sure that path exists"""
+    path = os.path.abspath(path)
+    assert os.path.isfile(path), "Json file does not exist: {}".format(path)
+    with open(path) as json_file:
+        args = json.load(json_file)
+    return args
+
+
+def save_json(dict1, path):
+    """Save a python object as a json file"""
+    path = os.path.abspath(path)
+    with open(path, 'w') as outfile:
+        json.dump(dict1, outfile)
+    assert os.path.isfile(path)
+    return path
 
 
 # this prints the following error:
@@ -167,7 +192,7 @@ def generator(input_vector, max_seq_len, g_layers, batch_size, len_x, forget_bia
 
 
 def pretrain_generator(input_vector, sequence_length_placeholder, g_layers, max_seq_len, len_x, forget_bias=1,
-                       dropout=False, output_keep_prob=1):
+                       dropout=False, output_keep_prob=1.0):
     """Generator function used to pretrain a generator network"""
     with tf.variable_scope("pretrain_g_lstm"):
         cells = [tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias, state_is_tuple=True) for n_hidden in g_layers]
@@ -212,7 +237,7 @@ def fulconn_layer(input_data, output_dim, seq_len=1, activation_func=None):
 
 
 def discriminator(input_vector, sequence_length_placeholder, d_layers, len_y, forget_bias=5, reuse=False,
-                  name="discriminator_lstm", dropout=False, output_keep_prob=1):
+                  name="discriminator_lstm", dropout=False, output_keep_prob=1.0):
     """Feeds output from lstm into input of same lstm cell"""
     with tf.variable_scope(name, reuse=reuse):
         cells = [tf.nn.rnn_cell.LSTMCell(n_hidden, forget_bias=forget_bias, state_is_tuple=True) for n_hidden in d_layers]
@@ -220,9 +245,6 @@ def discriminator(input_vector, sequence_length_placeholder, d_layers, len_y, fo
             cells = [tf.nn.rnn_cell.DropoutWrapper(cell, state_keep_prob=output_keep_prob) for cell in cells]
 
         multi_rnn_cell = tf.nn.rnn_cell.MultiRNNCell(cells)
-        # 'outputs' is a tensor of shape [batch_size, max_time, 256]
-        # 'state' is a N-tuple where N is the number of LSTMCells containing a
-        # tf.contrib.rnn.LSTMStateTuple for each cell
         output, _ = tf.nn.dynamic_rnn(cell=multi_rnn_cell,
                                       inputs=input_vector,
                                       dtype=tf.float32,
@@ -404,6 +426,7 @@ class TrainingData(object):
 class Hyperparameters(object):
     """Maintain Hyperparameters in class so they can be imported"""
     def __init__(self):
+        log.basicConfig(format='%(levelname)s:%(message)s', level=log.DEBUG)
         self.end_tweet_char = u'\u26D4'
         self.reduction_level = RL_HIGH
         self.twitter_data_path = os.path.abspath("example_tweet_data/train_csv")
@@ -418,7 +441,8 @@ class Hyperparameters(object):
         self.d_trained_model_dir = os.path.abspath("models/pretrain_discriminator")
 
         # generator vars
-        self.g_layers = [200, 200, 200]
+        # self.g_layers = [200, 200, 200]
+        self.g_layers = [200]
         self.g_forget_bias = 1
         self.g_drop_prob = 0.9
         self.g_dropout = True
@@ -427,17 +451,36 @@ class Hyperparameters(object):
         self.g_trained_model_dir = os.path.abspath("models/pretrain_generator")
 
 
+config = dict(end_tweet_char=u'\u26D4', reduction_level=RL_HIGH,
+              twitter_data_path=os.path.abspath("example_tweet_data/train_csv"),
+              d_layers=[200, 200, 200],
+              d_dropout=True,
+              d_drop_prob=0.9,
+              d_forget_bias=1,
+              d_model_name="pretrain_discriminator",
+              d_output_dir=os.path.abspath("models/pretrain_discriminator"),
+              d_trained_model_dir=os.path.abspath("models/pretrain_discriminator"),
+              g_layers=[200],
+              g_forget_bias=1,
+              g_drop_prob=0.9,
+              g_dropout=True,
+              g_model_name="pretrain_generator",
+              g_output_dir=os.path.abspath("models/pretrain_generator"),
+              g_trained_model_dir=os.path.abspath("models/pretrain_generator"))
+
 
 def main():
-    log.basicConfig(format='%(levelname)s:%(message)s', level=log.DEBUG)
     ##################################
     # define hyperparameters
+    log.basicConfig(format='%(levelname)s:%(message)s', level=log.DEBUG)
+
+    params = DotDict(load_json(os.path.abspath("base_config.json")))
     batch_size = 10
     learning_rate = 0.001
     iterations = 1000
     threads = 4
     # load hyperparams between pretrain graphs
-    params = Hyperparameters()
+    # params = Hyperparameters()
 
     model_name = "load_pretrain_gan"
     output_dir = os.path.abspath("models/multi_cell_GANs")
@@ -458,6 +501,7 @@ def main():
     else:
         model_path = os.path.join(output_dir, model_name)
     log.info("Model Path {}".format(model_path))
+    save_json(params, model_path+".json")
 
     ##################################
 

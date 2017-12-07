@@ -31,7 +31,8 @@ try:
 except ImportError:
     import queue
 
-from run_gan import pretrain_generator, load_tweet_data, list_dir, TrainingData, variable_summaries, Hyperparameters
+from run_gan import pretrain_generator, load_tweet_data, list_dir, TrainingData, variable_summaries, \
+    Hyperparameters, load_json, save_json, DotDict
 # reduction level definitions
 RL_NONE = 0
 RL_LOW = 1
@@ -42,12 +43,14 @@ RL_HIGH = 3
 def main():
     ##################################
     # define hyperparameters
-    batch_size = 100
+    log.basicConfig(format='%(levelname)s:%(message)s', level=log.DEBUG)
+    batch_size = 2
     learning_rate = 0.001
     iterations = 1000
     threads = 4
+    config_file = sys.argv[1]
     ####
-    params = Hyperparameters()
+    params = DotDict(load_json(config_file))
     ####
     load_model = False
     #####
@@ -56,14 +59,13 @@ def main():
     else:
         model_path = os.path.join(params.g_output_dir, params.g_model_name)
     log.info("Model Path {}".format(model_path))
+    save_json(params, model_path+".json")
 
     ##################################
 
     file_list = list_dir(params.twitter_data_path, ext="csv")
     len_x, max_seq_len, ix_to_char, char_to_ix, all_tweets, all_seq_len = \
         load_tweet_data(file_list, reduction_level=params.reduction_level)
-
-    gen_n_hidden = len_x
 
     # right now we are not passing generator output through fully conn layer so we have to match the size of each character
     # create placeholders for discriminator
@@ -74,6 +76,14 @@ def main():
     g_global_step = tf.get_variable(
         'g_global_step', [],
         initializer=tf.constant_initializer(0), trainable=False)
+
+    stop_char_index = tf.get_variable('stop_char_index', [],
+                                      initializer=tf.constant_initializer(char_to_ix[params.end_tweet_char]),
+                                      trainable=False, dtype=tf.int64)
+
+    max_seq_len_tensor = tf.get_variable('max_seq_len', [],
+                                         initializer=tf.constant_initializer(max_seq_len),
+                                         trainable=False, dtype=tf.int32)
 
     # create easily accessible training data
     training_data = TrainingData(all_tweets, all_seq_len, len_x, batch_size, char_to_ix=char_to_ix,
@@ -86,10 +96,20 @@ def main():
 
     log.info("Generator Model Built")
 
-    # generator sentences
+    def index1d(t):
+        """Get index of first appearance of specific character"""
+        index = tf.cast(tf.reduce_min(tf.where(tf.equal(stop_char_index, t))), dtype=tf.int32)
+        # return index
+        return tf.cond(index < 0, lambda: tf.cast(max_seq_len_tensor, dtype=tf.int32),
+                       lambda: tf.cast(tf.add(index, 1), dtype=tf.int32))
+
+    # indexes of most likely
     g_predict = tf.reshape(tf.argmax(Gz, 2), [batch_size, max_seq_len], name="g_predict")
-    g_accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.argmax(Gz, 2), tf.argmax(place_Y, 2)), dtype=tf.int32),
-                                name="g_accuracy")
+    # total right by batch
+    sum1 = tf.reduce_sum(tf.cast(tf.equal(tf.argmax(Gz, 2), tf.argmax(place_Y, 2)), dtype=tf.float32),
+                         axis=1, keep_dims=True)
+    # accuracy is number correct / seq len
+    g_accuracy = tf.reduce_mean(tf.divide(sum1, tf.cast(place_Seq, dtype=tf.float32)), name="g_accuracy")
 
     # calculate loss
     g_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=Gz, labels=place_Y))
@@ -122,15 +142,18 @@ def main():
             saver = tf.train.Saver(max_to_keep=4, keep_checkpoint_every_n_hours=2)
             saver.restore(sess, model_path)
             write_graph = True
-            log.info("Loaded Model: {}".format(trained_model_dir))
+            log.info("Loaded Model: {}".format(g_trained_model_dir))
         else:
             # initialize
             writer = tf.summary.FileWriter(params.g_output_dir, sess.graph)
             sess.run(tf.global_variables_initializer())
-            saver = tf.train.Saver(max_to_keep=4, keep_checkpoint_every_n_hours=2)
+            saver = tf.train.Saver()
+            # save meta graph
             saver.save(sess, model_path,
-                       global_step=g_global_step)
-            write_graph = True
+                       global_step=g_global_step, write_meta_graph=True)
+            saver = tf.train.Saver(max_to_keep=4, keep_checkpoint_every_n_hours=2)
+
+            write_graph = False
 
         # start training
         log.info("Started Training")
@@ -141,16 +164,18 @@ def main():
             _, gLoss = sess.run([trainerG, g_loss], feed_dict={place_X: x_batch,
                                                                place_Seq: seq_batch,
                                                                place_Y: y_batch})
-            # print(gPredict)
-            # print(gAccuracy)
-            # print(gLoss)
-            # z_batch = np.random.normal(0, 1, size=[batch_size, len_x])
             step += 1
             if step % 100 == 0:
-                summary_info, g_step = sess.run([all_summary, g_global_step], feed_dict={place_X: x_batch,
+                summary_info, g_step, fake_tweets = sess.run([all_summary, g_global_step, g_predict],
+                                                                            feed_dict={place_X: x_batch,
                                                                                          place_Seq: seq_batch,
                                                                                          place_Y: y_batch})
                 print("Step {}: Generator Loss {}".format(g_step, gLoss))
+                sentence = ''.join([ix_to_char[x] for x in fake_tweets[0]])
+                try:
+                    print(repr(sentence[:sentence.index(params.end_tweet_char) + 1]))
+                except ValueError:
+                    print(repr(sentence))
                 writer.add_summary(summary_info, global_step=g_step)
                 saver.save(sess, model_path,
                            global_step=g_global_step, write_meta_graph=write_graph)

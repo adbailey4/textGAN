@@ -107,8 +107,8 @@ class MyStreamListener(tweepy.StreamListener):
             self.w.writerow([self.counter, tweet[3:]])
         else:
             self.w.writerow([self.counter, tweet[3:]])
-        self.counter +=1
-        if self.counter % 10 == 0:
+        self.counter += 1
+        if self.counter % 300 == 0:
             print("Saved {} tweets".format(self.counter))
 
     def on_error(self, status_code):
