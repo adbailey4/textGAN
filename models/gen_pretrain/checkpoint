@@ -1,5 +1,0 @@
-model_checkpoint_path: "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/gen_pretrain/pretrain_generator-400"
-all_model_checkpoint_paths: "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/gen_pretrain/pretrain_generator-100"
-all_model_checkpoint_paths: "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/gen_pretrain/pretrain_generator-200"
-all_model_checkpoint_paths: "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/gen_pretrain/pretrain_generator-300"
-all_model_checkpoint_paths: "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/gen_pretrain/pretrain_generator-400"

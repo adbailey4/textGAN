@@ -1,5 +1,0 @@
-model_checkpoint_path: "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/one_cell_generator/load_pretrain_gan-430-820"
-all_model_checkpoint_paths: "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/one_cell_generator/load_pretrain_gan-430-790"
-all_model_checkpoint_paths: "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/one_cell_generator/load_pretrain_gan-430-800"
-all_model_checkpoint_paths: "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/one_cell_generator/load_pretrain_gan-430-810"
-all_model_checkpoint_paths: "/Users/andrewbailey/CLionProjects/nanopore-RNN/textGAN/models/one_cell_generator/load_pretrain_gan-430-820"
