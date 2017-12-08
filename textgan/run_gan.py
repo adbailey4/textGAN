@@ -7,7 +7,6 @@
 # Author: Andrew Bailey
 # History: 11/28/17 Created
 ########################################################################
-from __future__ import print_function
 import logging as log
 import sys
 import os
