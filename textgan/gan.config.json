@@ -1,0 +1,19 @@
+{
+  "gan": {
+    "model_name": "twitterGAN_0.0.1",
+    "save_model_dir": "/Users/andrewbailey/CLionProjects/textGAN/models/multi_cell_GANs",
+    "trained_model_dir": "/Users/andrewbailey/CLionProjects/textGAN/models/multi_cell_GANs",
+    "model_path": "/Users/andrewbailey/CLionProjects/textGAN/models/multi_cell_GANs",
+    "load_pretrain": false,
+    "use_checkpoint": false,
+    "batch_size": 2,
+    "learning_rate": 0.001,
+    "iterations": 1000,
+    "threads": 4,
+    "twitter_data_path": "/Users/andrewbailey/CLionProjects/textGAN/example_tweet_data/filtered_training",
+    "reduction_level": 3,
+    "end_tweet_char": "\u26d4"
+  }
+}
+
+

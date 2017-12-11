@@ -7,6 +7,7 @@
 # Author: Andrew Bailey
 # History: 11/28/17 Created
 ########################################################################
+
 import logging as log
 import sys
 import os
@@ -22,15 +23,19 @@ import time
 import tensorflow as tf
 from tensorflow.python.client import timeline
 from tensorflow.python.framework import ops
-
-import unicodecsv
-from unidecode import unidecode
+import csv
 import threading
+from basetensor.utils import DotDict, list_dir, load_json, save_json
+from textgan.tweet_datasets import TweetGeneratorDataset
 
 try:
     import Queue as queue
 except ImportError:
     import queue
+
+
+import unicodecsv
+from unidecode import unidecode
 
 # reduction level definitions
 RL_NONE = 0
@@ -55,45 +60,6 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 training_labels = collections.namedtuple('training_data', ['input', 'seq_len'])
 
 
-class DotDict(dict):
-    """dot.notation access to dictionary attributes"""
-    __getattr__ = dict.get
-    __setattr__ = dict.__setitem__
-    __delattr__ = dict.__delitem__
-
-
-def list_dir(path, ext=""):
-    """get all file paths from local directory with extension"""
-    if ext == "":
-        only_files = [os.path.join(os.path.abspath(path), f) for f in \
-                      os.listdir(path) if \
-                      os.path.isfile(os.path.join(os.path.abspath(path), f))]
-    else:
-        only_files = [os.path.join(os.path.abspath(path), f) for f in \
-                      os.listdir(path) if \
-                      os.path.isfile(os.path.join(os.path.abspath(path), f)) \
-                      if f.split(".")[-1] == ext]
-    return only_files
-
-
-def load_json(path):
-    """Load a json file and make sure that path exists"""
-    path = os.path.abspath(path)
-    assert os.path.isfile(path), "Json file does not exist: {}".format(path)
-    with open(path) as json_file:
-        args = json.load(json_file)
-    return args
-
-
-def save_json(dict1, path):
-    """Save a python object as a json file"""
-    path = os.path.abspath(path)
-    with open(path, 'w') as outfile:
-        json.dump(dict1, outfile)
-    assert os.path.isfile(path)
-    return path
-
-
 # this prints the following error:
 #   "RuntimeWarning: Surrogate character u'\udc23' will be ignored. You might be using a narrow Python build"
 def reduce_unicode_characters(unicode_str, reduction_level=RL_MED):
@@ -116,15 +82,23 @@ def read_tweet_data(filename, reduction_level):
     :param filename: File to read tweet data from.
     :return: list with handles and list with tweets; in order of file appearance.
     """
-    fileH = open(filename, 'r')
-    header = fileH.readline().rstrip().split(',')
     handles = []
     tweets = []
-    goodHandles = ["HillaryClinton", "realDonaldTrump", "none"]
-    r = unicodecsv.reader(fileH, encoding='utf-8')
-    for row in r:
-        handles.append(row[0])
-        tweets.append(reduce_unicode_characters(row[1], reduction_level=reduction_level))
+    with open(filename, 'r', encoding='utf-8') as fileH:
+        # header = fileH.readline().rstrip().split(',')
+        goodHandles = ["HillaryClinton", "realDonaldTrump", "none"]
+        # fileH.readline()
+        # print(fileH.readline())
+        # print(fileH.readline())
+        # print(fileH.readline())
+        # print(fileH.readline())
+        # print(fileH.readline())
+        # print(fileH.readline())
+        r = csv.reader(fileH)
+        print(r)
+        for row in r:
+            handles.append(row[0].encode("utf-8"))
+            tweets.append(reduce_unicode_characters(row[1], reduction_level=reduction_level))
     # write to file to test if data is read in correctly (should be exactly the same as the input file)
     # outfileH = open('./out.csv','w')
     # outfileH.write(",".join(header) + "\n")
@@ -472,7 +446,6 @@ def main():
     ##################################
     # define hyperparameters
     log.basicConfig(format='%(levelname)s:%(message)s', level=log.DEBUG)
-
     params = DotDict(load_json(os.path.abspath("base_config.json")))
     batch_size = 10
     learning_rate = 0.001
