@@ -101,11 +101,12 @@ def main():
     tweets.create_iterator()
     tweets.test()
 
-    gen_model = TweetGenerator(tweets, params.layers, log=log1)
-    gen_model.create_model()
-    gen_model.create_ops()
-    gan_training = GanTraining(gen_model, gen_model, log=log1)
-    gan_training.pretrain_generator(params)
+    with tf.device('/gpu:3'):
+        gen_model = TweetGenerator(tweets, params.layers, log=log1)
+        gen_model.create_model()
+        gen_model.create_ops()
+        gan_training = GanTraining(gen_model, gen_model, log=log1)
+        gan_training.pretrain_generator(params)
 
 
 if __name__ == '__main__':

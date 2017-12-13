@@ -222,7 +222,8 @@ class TextGan(CreateTFNetwork):
 
     def create_model(self):
         """Create generator and discriminator models"""
-        self.generator.create_model(pretrain=False)
+        with tf.device('/gpu:0'):
+            self.generator.create_model(pretrain=False)
 
         def index1d(t):
             """Get index of first appearance of specific character"""
@@ -240,7 +241,8 @@ class TextGan(CreateTFNetwork):
                                        lambda: self.discriminator.x, )
         self.discriminator.seq = tf.cond(self.use_generator, lambda: self.z_seq_length, lambda: self.discriminator.seq)
         # self.discriminator.y = tf.cond(self.use_generator, lambda: self.generator.y, lambda: self.discriminator.y)
-        self.discriminator.create_model()
+        with tf.device('/gpu:1'):
+            self.discriminator.create_model()
 
     def create_ops(self):
         self.predict = tf.reshape(tf.argmax(self.generator.final_output, 2),

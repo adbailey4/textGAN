@@ -55,15 +55,20 @@ class TweetGeneratorDataset(CreateTFDataset):
 
     def test(self):
         # pretraining data
+        config = tf.ConfigProto(log_device_placement=False,
+                                intra_op_parallelism_threads=8,
+                                allow_soft_placement=True)
+        config.gpu_options.allow_growth = True
+        config.gpu_options.visible_device_list = '0,1'
         in_1, seq, y = self.pretrain_iterator.get_next()
-        with tf.Session() as sess:
+        with tf.Session(config=config) as sess:
             sess.run(self.pretrain_iterator.initializer)
             test1 = sess.run([in_1])
             test2 = sess.run([seq])
             test3 = sess.run([y])
         # not pretraining data
         in_1= self.random_iterator.get_next()
-        with tf.Session() as sess:
+        with tf.Session(config=config) as sess:
             sess.run(self.random_iterator.initializer)
             test1 = sess.run([in_1])
 
@@ -225,8 +230,13 @@ class TweetDiscriminatorDataset(CreateTFDataset):
         return self.iterator
 
     def test(self):
+        config = tf.ConfigProto(log_device_placement=False,
+                                intra_op_parallelism_threads=8,
+                                allow_soft_placement=True)
+        config.gpu_options.allow_growth = True
+        config.gpu_options.visible_device_list = '0,1'
         in_1, seq, y = self.iterator.get_next()
-        with tf.Session() as sess:
+        with tf.Session(config=config) as sess:
             fake_iterator_handle = sess.run(self.fake_iterator.string_handle())
             real_iterator_handle = sess.run(self.real_iterator.string_handle())
             sess.run(self.real_iterator.initializer)

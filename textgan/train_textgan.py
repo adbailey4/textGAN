@@ -18,6 +18,8 @@ from basetensor.abstract import GanTFTraining
 from textgan.tweet_datasets import TweetGeneratorDataset, TweetDiscriminatorDataset
 from textgan.models import TweetGenerator, TweetDiscriminator, TextGan
 from py3helpers.utils import create_logger
+import re
+import subprocess
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -116,6 +118,8 @@ class GanTraining(GanTFTraining):
         config = tf.ConfigProto(log_device_placement=False,
                                 intra_op_parallelism_threads=8,
                                 allow_soft_placement=True)
+        config.gpu_options.allow_growth = True
+        config.gpu_options.visible_device_list='0,1'
         with tf.Session(config=config) as sess:
             sess.run(self.gen_model.dataset.pretrain_iterator.initializer)
             sess.run(self.gen_model.dataset.random_iterator.initializer)
@@ -235,10 +239,10 @@ class GanTraining(GanTFTraining):
                                 global_step=self.gen_model.global_step)
         all_summary = tf.summary.merge_all()
         print("Defined Optimizer", file=sys.stderr)
-        config = tf.ConfigProto(log_device_placement=False,
+        config = tf.ConfigProto(log_device_placement=True,
                                 intra_op_parallelism_threads=8,
                                 allow_soft_placement=True)
-
+        config.gpu_options.allow_growth = True
         with tf.Session(config=config) as sess:
             sess.run(self.gen_model.dataset.pretrain_iterator.initializer)
 
@@ -298,7 +302,7 @@ class GanTraining(GanTFTraining):
         config = tf.ConfigProto(log_device_placement=False,
                                 intra_op_parallelism_threads=8,
                                 allow_soft_placement=True)
-
+        config.gpu_options.allow_growth = True
         with tf.Session(config=config) as sess:
             fake_tweets_handle = sess.run(self.dis_model.dataset.fake_iterator.string_handle())
             real_tweets_handle = sess.run(self.dis_model.dataset.real_iterator.string_handle())
@@ -374,6 +378,23 @@ def load_gan_params(config_path, name, create_dir=True):
 
     return params
 
+def test_for_nvidia_gpu(num_gpu):
+    assert type(num_gpu) is int, "num_gpu option must be integer"
+    if num_gpu == 0:
+        return False
+    else:
+        try:
+            utilization = re.findall(r"Utilization.*?Gpu.*?(\d+).*?Memory.*?(\d+)",
+                                     subprocess.check_output(["nvidia-smi", "-q"]).decode('utf-8'),
+                                     flags=re.MULTILINE | re.DOTALL)
+            indices = [i for i, x in enumerate(utilization) if x == ('0', '0')]
+            assert len(indices) >= num_gpu, "Only {0} GPU's are available, change num_gpu parameter to {0}".format(
+                len(indices))
+            return indices[:num_gpu]
+        except OSError:
+            log.info("No GPU's found. Using CPU.")
+            return False
+
 
 def main():
     ##################################
@@ -398,7 +419,9 @@ def main():
                          debug=command_line.args["debug"])
 
     file_list = list_dir(params.twitter_data_path, ext="csv")
-
+    
+    gpus = test_for_nvidia_gpu(2)
+    print(gpus)
     tweets = TweetGeneratorDataset(log=log1)
     len_x, max_seq_len, ix_to_char, char_to_ix, all_tweets, all_seq_len = \
         tweets.load_training_data(file_list, reduction_level=params.reduction_level, end_tweet_char=params.end_tweet_char)
@@ -417,9 +440,10 @@ def main():
     d_tweets.create_dataset(batch_size=params.batch_size, n_epochs=1, pretrain=False)
     d_tweets.create_iterator()
     d_tweets.test()
-
-    gen_model = TweetGenerator(tweets, gen_params.layers, log=log1)
-    d_model = TweetDiscriminator(d_tweets, log=log1, layers=dis_params.layers)
+    with tf.device('/gpu:0'):
+        gen_model = TweetGenerator(tweets, gen_params.layers, log=log1)
+    with tf.device('/gpu:1'):    
+        d_model = TweetDiscriminator(d_tweets, log=log1, layers=dis_params.layers)
 
     gan_model = TextGan(generator=gen_model, discriminator=d_model, log=log1)
     gan_model.create_model()

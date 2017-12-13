@@ -16,7 +16,7 @@ from textgan.tweet_datasets import TweetDiscriminatorDataset
 from textgan.models import TweetDiscriminator
 from py3helpers.utils import create_logger
 from textgan.train_textgan import GanTraining, load_gan_params
-
+import tensorflow as tf
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 
@@ -101,12 +101,12 @@ def main():
     d_tweets.create_dataset(batch_size=params.batch_size, n_epochs=1, pretrain=True)
     d_tweets.create_iterator()
     d_tweets.test()
-
-    d_model = TweetDiscriminator(d_tweets, log=log1, layers=params.layers)
-    d_model.create_model(reuse=False, dropout=False, output_keep_prob=1, forget_bias=1)
-    d_model.create_ops()
-    gan_training = GanTraining(d_model, d_model, log=log1)
-    gan_training.pretrain_discriminator(params)
+    with tf.device('/gpu:2'):
+        d_model = TweetDiscriminator(d_tweets, log=log1, layers=params.layers)
+        d_model.create_model(reuse=False, dropout=False, output_keep_prob=1, forget_bias=1)
+        d_model.create_ops()
+        gan_training = GanTraining(d_model, d_model, log=log1)
+        gan_training.pretrain_discriminator(params)
 
 
 if __name__ == '__main__':

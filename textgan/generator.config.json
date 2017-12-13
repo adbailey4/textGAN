@@ -1,11 +1,11 @@
 {"generator": {
   "model_name": "pretrain_generator",
-  "save_model_dir": "/Users/andrewbailey/CLionProjects/textGAN/models/pretrain_generator",
-  "trained_model_dir": "/Users/andrewbailey/CLionProjects/textGAN/models/pretrain_generator/",
+  "save_model_dir": "/home/ubuntu/src/textGAN/models/pretrain_generator",
+  "trained_model_dir": "/home/ubuntu/src/textGAN/models/pretrain_generator/",
   "load_model": false,
   "use_checkpoint": false,
-  "model_path": "/Users/andrewbailey/CLionProjects/textGAN/models/pretrain_generator/",
-  "layers": [200],
+  "model_path": "/home/ubuntu/src/textGAN/models/pretrain_generator/",
+  "layers": [500, 500, 300],
   "dropout": true,
   "forget_bias": 1,
   "drop_prob": 0.9,
@@ -13,7 +13,7 @@
   "learning_rate": 0.001,
   "iterations": 1000,
   "threads": 4,
-  "twitter_data_path": "/Users/andrewbailey/CLionProjects/textGAN/example_tweet_data/filtered_training",
+  "twitter_data_path": "/home/ubuntu/src/textGAN/example_tweet_data/filtered_training",
   "reduction_level": 3,
   "end_tweet_char": "\u26d4"
 }
