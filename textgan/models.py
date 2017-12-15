@@ -238,7 +238,7 @@ class TextGan(CreateTFNetwork):
         self.z_seq_length = tf.map_fn(index1d, gen_char_index, dtype=tf.int32, back_prop=False)
 
         self.discriminator.x = tf.cond(self.use_generator, lambda: self.generator.final_output,
-                                       lambda: self.discriminator.x, )
+                                       lambda: self.discriminator.x)
         self.discriminator.seq = tf.cond(self.use_generator, lambda: self.z_seq_length, lambda: self.discriminator.seq)
         # self.discriminator.y = tf.cond(self.use_generator, lambda: self.generator.y, lambda: self.discriminator.y)
         with tf.device('/gpu:1'):

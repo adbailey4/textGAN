@@ -13,13 +13,11 @@ import os
 from datetime import datetime
 import argparse
 import tensorflow as tf
-from basetensor.utils import DotDict, list_dir, load_json, save_json, optimistic_restore
+from basetensor.utils import optimistic_restore, test_for_nvidia_gpu
 from basetensor.abstract import GanTFTraining
 from textgan.tweet_datasets import TweetGeneratorDataset, TweetDiscriminatorDataset
 from textgan.models import TweetGenerator, TweetDiscriminator, TextGan
-from py3helpers.utils import create_logger
-import re
-import subprocess
+from py3helpers.utils import create_logger, DotDict, list_dir, load_json, save_json
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -119,7 +117,6 @@ class GanTraining(GanTFTraining):
                                 intra_op_parallelism_threads=8,
                                 allow_soft_placement=True)
         config.gpu_options.allow_growth = True
-        config.gpu_options.visible_device_list='0,1'
         with tf.Session(config=config) as sess:
             sess.run(self.gen_model.dataset.pretrain_iterator.initializer)
             sess.run(self.gen_model.dataset.random_iterator.initializer)
@@ -167,13 +164,13 @@ class GanTraining(GanTFTraining):
                                self.dis_model.dataset.handle: real_tweets_handle})
                 step += 3
 
-                while g_acc < 0.5:
+                while g_acc < 0.5 and step // 100 <= display:
                     _, g_acc = sess.run([train_g, self.gan_model.g_accuracy],
                                         feed_dict={self.gan_model.use_generator: True,
                                                    self.dis_model.dataset.handle: real_tweets_handle})
 
                     step += 1
-                while (d_acc_real + d_acc_fake) / 2.0 < 0.5:
+                while (d_acc_real + d_acc_fake) / 2.0 < 0.5 and step // 100 <= display:
                     _, d_acc_real = sess.run([train_d, self.gan_model.d_accuracy],
                                              feed_dict={self.gan_model.use_generator: False,
                                                         self.dis_model.dataset.handle: real_tweets_handle})
@@ -185,45 +182,95 @@ class GanTraining(GanTFTraining):
 
                     step += 2
 
-            if step // 100 > display:
-                display += 1
-                g_summary, g_step, fake_tweets = sess.run(
-                    [self.gan_model.generator_summary, self.gen_model.global_step,
-                     self.gan_model.passed_sentences],
-                    feed_dict={self.gan_model.use_generator: True,
-                               self.dis_model.dataset.handle: real_tweets_handle})
-                d_summary, d_step = sess.run(
-                    [self.gan_model.discriminator_summary_real, self.dis_model.global_step],
-                    feed_dict={self.gan_model.use_generator: False,
-                               self.dis_model.dataset.handle: real_tweets_handle})
-                writer.add_summary(d_summary, global_step=d_step)
+                if step // 100 > display:
+                    display += 1
+                    g_summary, g_step, fake_tweets = sess.run(
+                        [self.gan_model.generator_summary, self.gen_model.global_step,
+                         self.gan_model.passed_sentences],
+                        feed_dict={self.gan_model.use_generator: True,
+                                   self.dis_model.dataset.handle: real_tweets_handle})
+                    d_summary, d_step = sess.run(
+                        [self.gan_model.discriminator_summary_real, self.dis_model.global_step],
+                        feed_dict={self.gan_model.use_generator: False,
+                                   self.dis_model.dataset.handle: real_tweets_handle})
+                    writer.add_summary(d_summary, global_step=d_step)
 
-                d_summary, d_step = sess.run(
-                    [self.gan_model.discriminator_summary_fake, self.dis_model.global_step],
-                    feed_dict={self.gan_model.use_generator: True,
-                               self.dis_model.dataset.handle: real_tweets_handle})
-                writer.add_summary(g_summary, global_step=g_step)
-                writer.add_summary(d_summary, global_step=d_step)
-                print("Global Discriminator Step: {}".format(d_step))
-                print("Global Generator Step: {}".format(g_step))
-                if len(fake_tweets) != 0:
-                    sentence = ''.join([self.gen_model.dataset.ix_to_char[x] for x in fake_tweets[0]])
-                    try:
-                        print(
-                            "step {}: ".format(g_step) + repr(sentence[:sentence.index(params.end_tweet_char) + 1]),
-                            file=open(params.model_path + ".tweets", "a"))
-                    except ValueError:
-                        print(repr(sentence))
-                        print("step {}: ".format(g_step) + repr(sentence),
-                              file=open(params.model_path + ".tweets", "a"))
-                saver.save(sess, params.model_path,
-                           global_step=self.gen_model.global_step + self.dis_model.global_step,
-                           write_meta_graph=False)
+                    d_summary, d_step = sess.run(
+                        [self.gan_model.discriminator_summary_fake, self.dis_model.global_step],
+                        feed_dict={self.gan_model.use_generator: True,
+                                   self.dis_model.dataset.handle: real_tweets_handle})
+                    writer.add_summary(g_summary, global_step=g_step)
+                    writer.add_summary(d_summary, global_step=d_step)
+                    print("Global Discriminator Step: {}".format(d_step))
+                    print("Global Generator Step: {}".format(g_step))
+                    if len(fake_tweets) != 0:
+                        sentence = ''.join([self.gen_model.dataset.ix_to_char[x] for x in fake_tweets[0]])
+                        try:
+                            print(
+                                "step {}: ".format(g_step) + repr(sentence[:sentence.index(params.end_tweet_char) + 1]),
+                                file=open(params.model_path + ".tweets", "a"))
+                        except ValueError:
+                            print(repr(sentence))
+                            print("step {}: ".format(g_step) + repr(sentence),
+                                  file=open(params.model_path + ".tweets", "a"))
+                    saver.save(sess, params.model_path,
+                               global_step=self.gen_model.global_step + self.dis_model.global_step,
+                               write_meta_graph=False)
 
             print("Finished Training", file=sys.stderr)
 
-    def run_generator(self):
-        pass
+    def run_generator(self, params, gen_params):
+        "Run trained generator"
+        config = tf.ConfigProto(log_device_placement=False,
+                                intra_op_parallelism_threads=8,
+                                allow_soft_placement=True)
+        config.gpu_options.allow_growth = True
+        with tf.Session(config=config) as sess:
+            sess.run(self.gen_model.dataset.pretrain_iterator.initializer)
+            sess.run(self.gen_model.dataset.random_iterator.initializer)
+            # real_tweets_handle = sess.run(self.dis_model.dataset.real_iterator.string_handle())
+            # sess.run(self.dis_model.dataset.fake_iterator.initializer)
+            # sess.run(self.dis_model.dataset.real_iterator.initializer)
+
+            if params.load_model:
+                saver = tf.train.Saver(max_to_keep=4, keep_checkpoint_every_n_hours=2)
+                saver.restore(sess, params.model_path)
+                saver.save(sess, params.model_path,
+                           global_step=self.gen_model.global_step, write_meta_graph=True)
+                print("Loaded Model: {}".format(params.model_path), file=sys.stderr)
+            elif gen_params.load_model:
+                sess.run(tf.global_variables_initializer())
+                optimistic_restore(sess, gen_params.model_path)
+                print("Using weights from pre-trained Generator", file=sys.stderr)
+                saver = tf.train.Saver(max_to_keep=4, keep_checkpoint_every_n_hours=2)
+            else:
+                # initialize
+                sess.run(tf.global_variables_initializer())
+                # save meta graph
+                saver = tf.train.Saver(max_to_keep=4, keep_checkpoint_every_n_hours=2)
+                saver.save(sess, params.model_path,
+                           global_step=self.gen_model.global_step, write_meta_graph=True)
+                print("Saving Model: {}".format(params.model_path), file=sys.stderr)
+            writer = tf.summary.FileWriter(params.trained_model_dir, sess.graph)
+            # start training
+            print("Start Generating Fake Tweets", file=sys.stderr)
+            step = 0
+            display = 0
+            while step < params.iterations:
+                prediction, g_step = sess.run([self.gen_model.predict, self.gen_model.global_step])
+                for tweet in prediction:
+                    sentence = ''.join([self.gen_model.dataset.ix_to_char[x] for x in tweet])
+                    try:
+                        print(repr(sentence))
+                        print(
+                            "step {}: ".format(g_step) + repr(sentence[:sentence.index(params.end_tweet_char) + 1]),
+                            file=open(gen_params.model_path + ".inference.tweets", "a"))
+                    except ValueError:
+                        print(repr(sentence))
+                        print("step {}: ".format(g_step) + repr(sentence),
+                              file=open(gen_params.model_path + ".inference.tweets", "a"))
+
+            print("Finished Training", file=sys.stderr)
 
     def read_parameters(self):
         pass
@@ -378,23 +425,6 @@ def load_gan_params(config_path, name, create_dir=True):
 
     return params
 
-def test_for_nvidia_gpu(num_gpu):
-    assert type(num_gpu) is int, "num_gpu option must be integer"
-    if num_gpu == 0:
-        return False
-    else:
-        try:
-            utilization = re.findall(r"Utilization.*?Gpu.*?(\d+).*?Memory.*?(\d+)",
-                                     subprocess.check_output(["nvidia-smi", "-q"]).decode('utf-8'),
-                                     flags=re.MULTILINE | re.DOTALL)
-            indices = [i for i, x in enumerate(utilization) if x == ('0', '0')]
-            assert len(indices) >= num_gpu, "Only {0} GPU's are available, change num_gpu parameter to {0}".format(
-                len(indices))
-            return indices[:num_gpu]
-        except OSError:
-            log.info("No GPU's found. Using CPU.")
-            return False
-
 
 def main():
     ##################################
@@ -415,19 +445,21 @@ def main():
     save_json(dict(discriminator=dis_params), params.model_path + "discriminator.config.json")
 
     # gan_config_path = command_line.args["gan_config"]
-    log1 = create_logger(params.model_path, verbose=command_line.args["verbose"],
+    log1 = create_logger(params.model_path, name="a", info=command_line.args["verbose"],
                          debug=command_line.args["debug"])
 
     file_list = list_dir(params.twitter_data_path, ext="csv")
-    
-    gpus = test_for_nvidia_gpu(2)
-    print(gpus)
+    # os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+
+    # gpus = test_for_nvidia_gpu(2)
+    # print(",".join(gpus))
     tweets = TweetGeneratorDataset(log=log1)
     len_x, max_seq_len, ix_to_char, char_to_ix, all_tweets, all_seq_len = \
         tweets.load_training_data(file_list, reduction_level=params.reduction_level, end_tweet_char=params.end_tweet_char)
     tweets.create_dataset(batch_size=params.batch_size, n_epochs=1, pretrain=False)
     tweets.create_iterator()
     tweets.test()
+
 
     d_tweets = TweetDiscriminatorDataset(log=log1)
     d_tweets.end_tweet_char = params.end_tweet_char
@@ -442,7 +474,13 @@ def main():
     d_tweets.test()
     with tf.device('/gpu:0'):
         gen_model = TweetGenerator(tweets, gen_params.layers, log=log1)
-    with tf.device('/gpu:1'):    
+        if False:
+            gen_model.create_model(pretrain=False)
+            gen_model.create_ops()
+            gan_training = GanTraining(gen_model, gen_model, log=log1)
+            gan_training.run_generator(params, gen_params)
+
+    with tf.device('/gpu:1'):
         d_model = TweetDiscriminator(d_tweets, log=log1, layers=dis_params.layers)
 
     gan_model = TextGan(generator=gen_model, discriminator=d_model, log=log1)

@@ -1,0 +1,6 @@
+[submodule "BaseTensor"]
+	path = BaseTensor
+	url = https://github.com/adbailey4/BaseTensor
+[submodule "python_utils"]
+	path = python_utils
+	url = https://github.com/adbailey4/python_utils

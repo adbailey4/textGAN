@@ -1,4 +1,4 @@
-all : python-recs BaseTensor textGAN
+all : python-recs python_utils BaseTensor textGAN
 
 python-recs: 
 	pip install tensorflow==1.4.0
@@ -9,7 +9,10 @@ BaseTensor:
 textGAN:
 	python setup.py install
 
+python_utils:
+	cd python_utils && python setup.py install
+
 test:
 	pytest
 
-.PHONY: BaseTensor textGAN python-recs
+.PHONY: BaseTensor textGAN python-recs python_utils

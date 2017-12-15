@@ -124,22 +124,22 @@ class MyStreamListener(tweepy.StreamListener):
 
 
 def main():
-    key_data = load_json(sys.argv[1])
-
-    consumer_key = key_data["consumer_key"]
-    consumer_secret = key_data["consumer_secret"]
-    access_token = key_data["access_token"]
-    access_secret = key_data["access_secret"]
-
-    auth = OAuthHandler(consumer_key, consumer_secret)
-    auth.set_access_token(access_token, access_secret)
-
-    keywords = ['twitter']
-    api = tweepy.API(auth, wait_on_rate_limit=True, wait_on_rate_limit_notify=True, compression=True)
-    myStreamListener = MyStreamListener(api)
-    myStream = tweepy.Stream(auth=api.auth, listener=myStreamListener)
-    print("Connected to Twitter")
-    myStream.filter(track=keywords, languages=['en'], async=False)
+    # key_data = load_json(sys.argv[1])
+    #
+    # consumer_key = key_data["consumer_key"]
+    # consumer_secret = key_data["consumer_secret"]
+    # access_token = key_data["access_token"]
+    # access_secret = key_data["access_secret"]
+    #
+    # auth = OAuthHandler(consumer_key, consumer_secret)
+    # auth.set_access_token(access_token, access_secret)
+    #
+    # keywords = ['twitter']
+    # api = tweepy.API(auth, wait_on_rate_limit=True, wait_on_rate_limit_notify=True, compression=True)
+    # myStreamListener = MyStreamListener(api)
+    # myStream = tweepy.Stream(auth=api.auth, listener=myStreamListener)
+    # print("Connected to Twitter")
+    # myStream.filter(track=keywords, languages=['en'], async=False)
 
     # scraper = RandomTwitterData(api)
     # scraper.generate_users(10, 5, per_user=5)
@@ -149,6 +149,23 @@ def main():
     #     w = unicodecsv.writer(csv_file, encoding='utf-8')
     #     w.writerow(("handle", "tweet"))
     #     w.writerows([[i, tweet] for i, tweet in enumerate(scraper.tweets)])
+
+    in_csv = "/Users/andrewbailey/CLionProjects/textGAN/example_tweet_data/train_csv/198581_random_tweets.csv"
+    # in_csv = "/Users/andrewbailey/CLionProjects/textGAN/example_tweet_data/train_csv/40991_random_tweets.csv"
+    # in_csv = "/Users/andrewbailey/CLionProjects/textGAN/example_tweet_data/test/test.csv"
+    # in_csv = "/Users/andrewbailey/CLionProjects/textGAN/example_tweet_data/train_csv/31485_random_tweets.csv"
+
+    filter_csv = "/Users/andrewbailey/CLionProjects/textGAN/example_tweet_data/train_csv/train_filtered.csv"
+    filter_csv = "/Users/andrewbailey/CLionProjects/textGAN/example_tweet_data/filtered_training/198581_random_tweets_fltered.csv"
+    # filter_csv = "/Users/andrewbailey/CLionProjects/textGAN/example_tweet_data/filtered_training/40991_random_tweets_fltered.csv"
+    # filter_csv = "/Users/andrewbailey/CLionProjects/textGAN/example_tweet_data/filtered_training/31485_random_tweets_fltered.csv"
+
+    with open(in_csv, 'r', encoding="utf-8") as csv_file, open(filter_csv, "w+") as write_file:
+        for line in csv_file:
+            write_file.write(line)
+
+    # line.decode('utf-8','ignore').encode("utf-8")
+
 
 
 if __name__ == '__main__':

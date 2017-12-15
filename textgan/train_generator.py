@@ -11,11 +11,12 @@
 import sys
 import os
 import argparse
-from basetensor.utils import DotDict, list_dir, load_json, save_json
+# from basetensor.utils import DotDict, list_dir, load_json, save_json
 from textgan.tweet_datasets import TweetGeneratorDataset
 from textgan.models import TweetGenerator
-from py3helpers.utils import create_logger
+from py3helpers.utils import create_logger, DotDict, list_dir, load_json, save_json
 from textgan.train_textgan import GanTraining, load_gan_params
+import tensorflow as tf
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -51,6 +52,9 @@ class CommandLine(object):
         # optional arguments
         self.parser.add_argument('-g', '--generator_config',
                                  help='path to json generator config')
+        self.parser.add_argument('-c', '--gan_config',
+                                 help='path to json gan config')
+
         self.parser.add_argument('-v', '--verbose',
                                  help='verbose option', default=False, action="store_true")
         self.parser.add_argument('--debug',
@@ -79,13 +83,17 @@ class CommandLine(object):
 
 def main():
     ##################################
-    pretrain_generator = True
+    generate_tweets = True
 
     command_line = CommandLine()
     gen_config_path = command_line.args["generator_config"]
+    gen_config_path = command_line.args["gan_config"]
+
     assert gen_config_path, "Must specify Generator config"
 
     params = load_gan_params(gen_config_path, name="generator")
+    gan_params = load_gan_params(gen_config_path, name="gan", create_dir=False)
+
     print("Model Path: {}".format(params.model_path), file=sys.stderr)
 
     # gan_config_path = command_line.args["gan_config"]
@@ -103,10 +111,14 @@ def main():
 
     with tf.device('/gpu:3'):
         gen_model = TweetGenerator(tweets, params.layers, log=log1)
-        gen_model.create_model()
+
+        gen_model.create_model(pretrain=generate_tweets)
         gen_model.create_ops()
         gan_training = GanTraining(gen_model, gen_model, log=log1)
-        gan_training.pretrain_generator(params)
+        if generate_tweets:
+            gan_training.run_generator(gan_params, params)
+        else:
+            gan_training.pretrain_generator(params)
 
 
 if __name__ == '__main__':

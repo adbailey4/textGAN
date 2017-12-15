@@ -1,9 +1,0 @@
-README.md
-setup.py
-py3helpers/__init__.py
-py3helpers/utils.py
-python_utils.egg-info/PKG-INFO
-python_utils.egg-info/SOURCES.txt
-python_utils.egg-info/dependency_links.txt
-python_utils.egg-info/top_level.txt
-python_utils.egg-info/zip-safe

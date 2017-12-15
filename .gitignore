@@ -1,0 +1,14 @@
+.idea
+models/
+run_gan.pyc
+cmake-build-debug/
+twitter_keys.json
+build/
+dist/
+textGAN.egg-info/
+.cache/
+py3helpers.egg-info/
+py3helpers/__pycache__/
+python_utils.egg-info/
+basetensor.egg-info/
+textgan/__pycache__/
