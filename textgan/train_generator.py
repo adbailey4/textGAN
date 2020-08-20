@@ -87,7 +87,7 @@ def main():
 
     command_line = CommandLine()
     gen_config_path = command_line.args["generator_config"]
-    gen_config_path = command_line.args["gan_config"]
+    # gen_config_path = command_line.args["gan_config"]
 
     assert gen_config_path, "Must specify Generator config"
 
